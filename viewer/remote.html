@@ -182,7 +182,8 @@
         <input type="text" id="mqtt-user" placeholder="Username (optional)">
         <input type="password" id="mqtt-pass" placeholder="Password (leave blank to keep)">
         <button class="btn btn-save" id="r-ha-save" onclick="saveMqtt()" style="margin-top:6px;">Save Home Assistant</button>
-        <div id="mqtt-status" style="margin-top:6px;font-size:13px;color:#8ad;"></div>
+        <div id="mqtt-conn" style="margin-top:8px;font-size:13px;font-weight:600;color:#889;">Status: —</div>
+        <div id="mqtt-status" style="margin-top:4px;font-size:13px;color:#8ad;"></div>
     </div>
 
     <div class="btn-row">
@@ -571,17 +572,37 @@
             render();
         });
 
-        function loadMqtt() {
+        var MQTT_STATUS = {
+            disabled: ['Disabled', '#889'],
+            connecting: ['Connecting…', '#da3'],
+            connected: ['✓ Connected to broker', '#3c6'],
+            auth_failed: ['✗ Wrong username/password (not authorized)', '#e55'],
+            broker_unavailable: ['✗ Broker unavailable', '#e55'],
+            no_broker: ['No broker address set', '#e55'],
+            error: ['✗ Connection error', '#e55']
+        };
+        function renderMqttStatus(m) {
+            var el = document.getElementById('mqtt-conn');
+            if (!el) return;
+            var s = MQTT_STATUS[m.status] || ['—', '#889'];
+            el.textContent = 'Status: ' + s[0];
+            el.style.color = s[1];
+        }
+        function loadMqtt(fillInputs) {
             fetch('/api/mqtt').then(function(r) { return r.json(); }).then(function(m) {
-                document.getElementById('mqtt-enabled').checked = !!m.enabled;
-                document.getElementById('mqtt-host').value = m.host || '';
-                document.getElementById('mqtt-port').value = m.port || 1883;
-                document.getElementById('mqtt-user').value = m.username || '';
-                document.getElementById('mqtt-pass').placeholder =
-                    m.has_password ? 'Password (leave blank to keep)' : 'Password (optional)';
+                if (fillInputs) {
+                    document.getElementById('mqtt-enabled').checked = !!m.enabled;
+                    document.getElementById('mqtt-host').value = m.host || '';
+                    document.getElementById('mqtt-port').value = m.port || 1883;
+                    document.getElementById('mqtt-user').value = m.username || '';
+                    document.getElementById('mqtt-pass').placeholder =
+                        m.has_password ? 'Password (leave blank to keep)' : 'Password (optional)';
+                }
+                renderMqttStatus(m);
             }).catch(function() {});
         }
-        loadMqtt();
+        loadMqtt(true);
+        setInterval(function() { loadMqtt(false); }, 3000);
 
         function saveMqtt() {
             var st = document.getElementById('mqtt-status');

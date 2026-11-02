@@ -796,14 +796,24 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         self._json_response({'ok': True})
 
     def serve_mqtt_config(self):
-        """Serve the MQTT/Home Assistant settings (password masked)."""
+        """Serve the MQTT/Home Assistant settings + live connection status."""
         m = (self.app.config or {}).get('mqtt', {}) or {}
+        bridge = getattr(self.app, 'mqtt_bridge', None)
+        if not m.get('enabled'):
+            status, connected = 'disabled', False
+        elif bridge is not None:
+            status = getattr(bridge, 'status', 'connecting')
+            connected = bool(getattr(bridge, 'connected', False))
+        else:
+            status, connected = 'connecting', False
         self._json_response({
             'enabled': bool(m.get('enabled')),
             'host': m.get('host', ''),
             'port': int(m.get('port', 1883)),
             'username': m.get('username', ''),
             'has_password': bool(m.get('password')),
+            'status': status,
+            'connected': connected,
         })
 
     def handle_save_mqtt(self):

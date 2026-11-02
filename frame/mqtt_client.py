@@ -45,11 +45,15 @@ class MqttBridge:
         self.avail_topic = f"{self.base}/availability"
         self._client = None
         self._stop = threading.Event()
+        self.connected = False
+        self.status = 'stopped'  # stopped|connecting|connected|auth_failed|
+                                 # broker_unavailable|no_broker|error
 
     # --- lifecycle ----------------------------------------------------------
     def start(self):
         if not self.host:
             logger.warning("MQTT enabled but no broker host set; not starting")
+            self.status = 'no_broker'
             return False
         try:
             import paho.mqtt.client as mqtt
@@ -69,10 +73,12 @@ class MqttBridge:
                 self._client.username_pw_set(self.username, self.password)
             self._client.will_set(self.avail_topic, 'offline', retain=True)
             self._client.on_connect = self._on_connect
+            self._client.on_disconnect = self._on_disconnect
             self._client.on_message = self._on_message
             self._client.reconnect_delay_set(min_delay=1, max_delay=30)
             self._client.connect_async(self.host, self.port, keepalive=60)
             self._client.loop_start()
+            self.status = 'connecting'
             threading.Thread(target=self._state_loop, daemon=True).start()
             logger.info(f"MQTT bridge connecting to {self.host}:{self.port} "
                         f"as device '{self.device_id}'")
@@ -96,14 +102,25 @@ class MqttBridge:
 
     # --- MQTT callbacks -----------------------------------------------------
     def _on_connect(self, client, userdata, flags, rc, *args):
+        rc = int(rc)
         if rc != 0:
-            logger.warning(f"MQTT connect failed (rc={rc})")
+            self.connected = False
+            self.status = {3: 'broker_unavailable', 4: 'auth_failed',
+                           5: 'auth_failed'}.get(rc, 'error')
+            logger.warning(f"MQTT connect failed (rc={rc}, {self.status})")
             return
+        self.connected = True
+        self.status = 'connected'
         logger.info("MQTT connected; publishing discovery + state")
         client.publish(self.avail_topic, 'online', retain=True)
         client.subscribe(f"{self.base}/+/set")
         self._publish_discovery()
         self.publish_state()
+
+    def _on_disconnect(self, client, userdata, *args):
+        self.connected = False
+        if self.status == 'connected':
+            self.status = 'connecting'  # paho will auto-reconnect
 
     def _on_message(self, client, userdata, msg):
         try:
