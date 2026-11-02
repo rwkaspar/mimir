@@ -2345,18 +2345,23 @@
                 ip = tsIp || location.hostname;
             }
             var port = location.port || '8080';
-            var url = 'http://' + ip + ':' + port + '/remote';
-            document.getElementById('qr-url').textContent = url;
-            generateQR(url, document.getElementById('qr-canvas'), 8);
-            // Show Tailscale URL if connected and different from main IP
-            var tsEl = document.getElementById('qr-tailscale-url');
-            if (tsIp && tsIp !== '--' && tsIp !== ip) {
-                tsEl.textContent = 'Tailscale: http://' + tsIp + ':' + port + '/remote';
-                tsEl.style.display = '';
-            } else {
-                tsEl.style.display = 'none';
-            }
-            document.getElementById('qr-overlay').classList.add('visible');
+            // Append the access token so the scanned link is authorized on the
+            // LAN. Fetched from localhost (/api/access is open to the kiosk).
+            fetch('/api/access').then(function(r) { return r.json(); }).catch(function() { return {}; })
+            .then(function(acc) {
+                var q = acc && acc.token ? ('?token=' + encodeURIComponent(acc.token)) : '';
+                var url = 'http://' + ip + ':' + port + '/remote' + q;
+                document.getElementById('qr-url').textContent = url;
+                generateQR(url, document.getElementById('qr-canvas'), 8);
+                var tsEl = document.getElementById('qr-tailscale-url');
+                if (tsIp && tsIp !== '--' && tsIp !== ip) {
+                    tsEl.textContent = 'Tailscale: http://' + tsIp + ':' + port + '/remote' + q;
+                    tsEl.style.display = '';
+                } else {
+                    tsEl.style.display = 'none';
+                }
+                document.getElementById('qr-overlay').classList.add('visible');
+            });
         }
 
         function closeFolderSync() {

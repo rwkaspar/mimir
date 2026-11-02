@@ -2,6 +2,7 @@
 
 import json
 import logging
+import secrets
 from pathlib import Path
 
 import yaml
@@ -27,6 +28,22 @@ class AppState:
         self._album_cache_path = Path(self.config_path).parent / '.album_names.json'
         self._load_album_cache()
         self.wizard_mode = False
+        # Access token gates remote (non-localhost) access to the web UI/API so
+        # nobody on the LAN can read album share links or control the frame.
+        self.access_token = self._ensure_access_token()
+
+    def _ensure_access_token(self) -> str:
+        """Return the persistent access token, generating one on first run."""
+        sec = self.config.setdefault('security', {})
+        token = sec.get('access_token')
+        if not token:
+            token = secrets.token_urlsafe(24)
+            sec['access_token'] = token
+            try:
+                self.save_config()
+            except Exception as e:
+                logger.warning(f"Could not persist access token: {e}")
+        return token
 
     def load_config(self) -> dict:
         """Load config from YAML file."""

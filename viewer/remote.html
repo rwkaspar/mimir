@@ -180,6 +180,26 @@
     <div id="status-bar"></div>
 
     <script>
+        // --- Access token: captured from ?token=... (QR link), persisted, and
+        // attached to every API request so the frame accepts us from the LAN.
+        (function () {
+            var token = null;
+            try {
+                var m = location.search.match(/[?&]token=([^&]+)/);
+                if (m) { token = decodeURIComponent(m[1]); localStorage.setItem('pf_token', token); }
+                else { token = localStorage.getItem('pf_token'); }
+            } catch (e) {}
+            if (!token) return;
+            var _fetch = window.fetch;
+            window.fetch = function (input, init) {
+                init = init || {};
+                var h = new Headers(init.headers || {});
+                h.set('X-Frame-Token', token);
+                init.headers = h;
+                return _fetch(input, init);
+            };
+        })();
+
         var i18n = {
             en: {
                 title: 'FolderSync', subtitle: 'Configure photo sources',

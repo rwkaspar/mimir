@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -32,6 +33,73 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         self.slideshow_config = slideshow_config or {}
         super().__init__(*args, **kwargs)
 
+    # --- Access control ---
+
+    LOCAL_IPS = {'127.0.0.1', '::1', '::ffff:127.0.0.1'}
+
+    def _client_is_local(self):
+        ip = self.client_address[0] if self.client_address else ''
+        return ip in self.LOCAL_IPS
+
+    def _presented_token(self, parsed_path):
+        """Extract a token from query string, header, or cookie."""
+        qs = parse_qs(parsed_path.query)
+        if qs.get('token'):
+            return qs['token'][0]
+        hdr = self.headers.get('X-Frame-Token')
+        if hdr:
+            return hdr.strip()
+        auth = self.headers.get('Authorization', '')
+        if auth.startswith('Bearer '):
+            return auth[7:].strip()
+        raw_cookie = self.headers.get('Cookie')
+        if raw_cookie:
+            try:
+                jar = SimpleCookie()
+                jar.load(raw_cookie)
+                if 'pf_token' in jar:
+                    return jar['pf_token'].value
+            except Exception:
+                pass
+        return None
+
+    def _request_authorized(self, parsed_path):
+        """Allow localhost (the kiosk) and hotspot-mode setup unconditionally;
+        otherwise require the access token.  Protects album links and controls
+        from anyone else on the LAN."""
+        if self._client_is_local():
+            return True
+        wifi = getattr(self.app, 'wifi_manager', None)
+        if wifi is not None and getattr(wifi, 'mode', 'normal') == 'hotspot':
+            return True
+        token = getattr(self.app, 'access_token', None)
+        if not token:
+            return True  # fail open if somehow unconfigured
+        return self._presented_token(parsed_path) == token
+
+    def _send_auth_required(self, path):
+        """Reject an unauthorized remote request."""
+        if path.startswith('/api/') or path in (
+                '/config', '/list', '/sysinfo', '/brightness', '/schedule',
+                '/orientation', '/sync/status'):
+            self.send_response(401)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(
+                {'error': 'unauthorized',
+                 'message': 'Access token required'}).encode())
+        else:
+            body = (b"<!doctype html><meta charset=utf-8>"
+                    b"<title>Photo Frame</title>"
+                    b"<body style='font-family:sans-serif;max-width:32em;"
+                    b"margin:3em auto;padding:0 1em;line-height:1.5'>"
+                    b"<h2>Access restricted</h2><p>Scan the QR code shown in "
+                    b"the frame's menu (Remote access) to open this page.</p>")
+            self.send_response(401)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(body)
+
     def do_GET(self):
         """Handle GET requests."""
         parsed_path = urlparse(self.path)
@@ -41,7 +109,10 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.send_response(204)
             self.end_headers()
             return
-        elif path == '/' or path == '/index.html':
+        if not self._request_authorized(parsed_path):
+            self._send_auth_required(path)
+            return
+        if path == '/' or path == '/index.html':
             if self.app and self.app.wizard_mode:
                 self.serve_wizard()
             else:
@@ -90,6 +161,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.serve_screen_detect()
         elif path == '/api/version':
             self.serve_version()
+        elif path == '/api/access':
+            self.serve_access_info()
         elif path.startswith('/photos/'):
             photo_name = path[8:]  # Remove '/photos/' prefix
             self.serve_photo(photo_name)
@@ -98,6 +171,10 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         """Handle POST requests."""
+        parsed_path = urlparse(self.path)
+        if not self._request_authorized(parsed_path):
+            self._send_auth_required(parsed_path.path)
+            return
         if self.path == '/shutdown':
             self.handle_shutdown()
         elif self.path == '/reboot':
@@ -327,6 +404,18 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         """Serve cached system info as JSON (updated every 30s in background)."""
         info = self.app.sysinfo_cache.get() if self.app and self.app.sysinfo_cache else {}
         self._json_response(info)
+
+    def serve_access_info(self):
+        """Serve the access token and ready-made remote URLs for a QR code.
+
+        Only reachable by authorized callers (localhost kiosk or hotspot
+        setup), so the token itself stays off the open LAN.
+        """
+        token = getattr(self.app, 'access_token', '') or ''
+        info = self.app.sysinfo_cache.get() if self.app and self.app.sysinfo_cache else {}
+        ips = info.get('ips', []) or []
+        urls = [f"http://{ip}:8080/remote?token={token}" for ip in ips]
+        self._json_response({'token': token, 'ips': ips, 'urls': urls})
 
     def handle_set_brightness(self):
         """Set the display backlight brightness via DDC/CI (VCP 10).

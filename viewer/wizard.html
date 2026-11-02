@@ -1124,10 +1124,11 @@
     }
 
     function albumsRender() {
-        // Generate QR code pointing to remote config page (use real IP, not localhost)
-        fetch('/sysinfo').then(function(r) { return r.json(); }).then(function(info) {
-            var ip = (info.ips && info.ips[0]) || location.hostname;
-            var remoteUrl = 'http://' + ip + ':8080/remote';
+        // Generate QR code pointing to the remote config page. Include the
+        // access token so the phone is authorized once it leaves the hotspot.
+        fetch('/api/access').then(function(r) { return r.json(); }).then(function(acc) {
+            var remoteUrl = (acc.urls && acc.urls[0]) ||
+                ('http://' + location.hostname + ':8080/remote');
             var qrUrlEl = document.getElementById('album-qr-url');
             if (qrUrlEl) qrUrlEl.textContent = remoteUrl;
             return fetch('/api/qrcode?text=' + encodeURIComponent(remoteUrl));
