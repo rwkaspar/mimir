@@ -205,7 +205,9 @@ class EnergySaveManager:
             subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '4'],
                          capture_output=True, timeout=10)
         elif method == 'dpms':
-            subprocess.run(['sudo', 'wlopm', '--off', '*'],
+            # Run as our own user (the compositor runs as robert too); sudo would
+            # strip WAYLAND_DISPLAY/XDG_RUNTIME_DIR so wlopm couldn't connect.
+            subprocess.run(['wlopm', '--off', '*'],
                          capture_output=True, timeout=5, env=self._wayland_env())
         elif method == 'brightness':
             subprocess.run(['sudo', 'ddcutil', 'setvcp', '10', '0'],
@@ -222,7 +224,7 @@ class EnergySaveManager:
             subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '1'],
                          capture_output=True, timeout=10)
         elif method == 'dpms':
-            subprocess.run(['sudo', 'wlopm', '--on', '*'],
+            subprocess.run(['wlopm', '--on', '*'],
                          capture_output=True, timeout=5, env=self._wayland_env())
         elif method == 'brightness':
             subprocess.run(['sudo', 'ddcutil', 'setvcp', '10', '100'],
