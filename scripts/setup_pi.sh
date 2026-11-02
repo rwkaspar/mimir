@@ -409,11 +409,21 @@ echo "Configuring quiet boot..."
 CMDLINE="/boot/firmware/cmdline.txt"
 if [ -f "$CMDLINE" ]; then
     # Add quiet boot params if not present
-    for param in "quiet" "loglevel=0" "vt.global_cursor_default=0" "logo.nologo"; do
+    for param in "quiet" "loglevel=0" "vt.global_cursor_default=0" "logo.nologo" "systemd.show_status=false"; do
         if ! grep -q "$param" "$CMDLINE"; then
             sed -i "s/$/ $param/" "$CMDLINE"
         fi
     done
+    # Move the boot console off tty1 (the VT the kiosk takes over) so kernel
+    # and systemd messages never appear where the frame will be — tty1 stays
+    # black until cage starts. Debug console remains on tty3 (Ctrl+Alt+F3).
+    sed -i "s/console=tty1/console=tty3/" "$CMDLINE"
+fi
+
+# Hide the firmware rainbow splash shown before the kernel loads.
+CONFIG="/boot/firmware/config.txt"
+if [ -f "$CONFIG" ] && ! grep -q "^disable_splash=1" "$CONFIG"; then
+    printf "\n# Hide firmware rainbow splash\ndisable_splash=1\n" >> "$CONFIG"
 fi
 
 # Disable login prompt on tty1 (permanently)
