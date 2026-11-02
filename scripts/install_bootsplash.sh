@@ -56,16 +56,21 @@ if [ -f "$CMDLINE" ]; then
     done
 fi
 
-# --- Seamless hand-off: retain the splash when Plymouth quits ---------------
-# Without this, Plymouth clears to black at the end of boot, leaving a blank
-# screen until the compositor/Chromium paints. --retain-splash freezes the
-# last frame (the logo) on screen until something draws over it.
+# --- Seamless hand-off ------------------------------------------------------
+# Keep the Plymouth splash up (and its spinner animating) until the kiosk
+# compositor is about to start, instead of quitting at multi-user.target and
+# leaving a ~5s black gap before swaybg paints. The cage service quits it with
+# --retain-splash as its last step, right before labwc.
 mkdir -p /etc/systemd/system/plymouth-quit.service.d
 cat > /etc/systemd/system/plymouth-quit.service.d/retain.conf <<'EOF'
 [Service]
+# Do not quit here; cage quits Plymouth right before it starts labwc.
 ExecStart=
-ExecStart=-/usr/bin/plymouth quit --retain-splash
+ExecStart=/bin/true
 EOF
+# Nothing must block boot waiting for the splash to quit (we quit it late),
+# otherwise multi-user.target would wait on a splash the kiosk hasn't reached.
+systemctl mask plymouth-quit-wait.service 2>/dev/null || true
 systemctl daemon-reload 2>/dev/null || true
 
 # --- Activate + rebuild initramfs (so the theme ships in early boot) --------

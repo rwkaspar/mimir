@@ -14,12 +14,12 @@ Environment="XDG_CONFIG_HOME=/home/robert/digital_photo_frame"
 Environment="XCURSOR_PATH=/home/robert/digital_photo_frame/labwc/icons"
 Environment="XCURSOR_THEME=empty"
 Environment="XCURSOR_SIZE=1"
-# Quit Plymouth but keep its last frame on screen (no black gap); swaybg in
-# labwc/autostart then shows the same logo until Chromium paints.
-ExecStartPre=-/usr/bin/plymouth quit --retain-splash
 ExecStartPre=/bin/mkdir -p /tmp/frame-runtime
 ExecStartPre=/bin/chmod 700 /tmp/frame-runtime
 ExecStartPre=/bin/sleep 5
+# Quit Plymouth at the last moment (its spinner animates until now) and retain
+# its frame, so swaybg/Chromium take over with no black gap.
+ExecStartPre=-/usr/bin/plymouth quit --retain-splash
 ExecStart=/usr/bin/labwc -s /bin/true
 Restart=on-failure
 RestartSec=10

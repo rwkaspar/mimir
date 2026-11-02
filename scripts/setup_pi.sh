@@ -329,11 +329,11 @@ Environment="XDG_CONFIG_HOME=${REPO_DIR}"
 Environment="XCURSOR_PATH=${REPO_DIR}/labwc/icons"
 Environment="XCURSOR_THEME=empty"
 Environment="XCURSOR_SIZE=1"
-ExecStartPre=-/usr/bin/plymouth quit --retain-splash
 ExecStartPre=/bin/mkdir -p /tmp/frame-runtime
 ExecStartPre=/bin/chmod 700 /tmp/frame-runtime
 ExecStartPre=/bin/sleep 5
 ExecStartPre=+${REPO_DIR}/scripts/set_touch_cal.sh
+ExecStartPre=-/usr/bin/plymouth quit --retain-splash
 ExecStart=/usr/bin/labwc -s /bin/true
 Restart=on-failure
 RestartSec=10
