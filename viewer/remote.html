@@ -171,6 +171,20 @@
     <div id="nc-albums"></div>
     <button class="btn-add" id="r-add-nc" onclick="addNcAlbum()">+ Add Nextcloud Album</button>
 
+    <h2 class="section-header" id="r-ha-header">Home Assistant (MQTT)</h2>
+    <div class="album-card">
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <input type="checkbox" id="mqtt-enabled">
+            <span id="r-ha-enable">Control the frame from Home Assistant</span>
+        </label>
+        <input type="text" id="mqtt-host" placeholder="Broker host (e.g. 192.168.1.10)">
+        <input type="text" id="mqtt-port" placeholder="Port (1883)">
+        <input type="text" id="mqtt-user" placeholder="Username (optional)">
+        <input type="password" id="mqtt-pass" placeholder="Password (leave blank to keep)">
+        <button class="btn btn-save" id="r-ha-save" onclick="saveMqtt()" style="margin-top:6px;">Save Home Assistant</button>
+        <div id="mqtt-status" style="margin-top:6px;font-size:13px;color:#8ad;"></div>
+    </div>
+
     <div class="btn-row">
         <button class="btn btn-save" id="r-save" onclick="saveConfig()">Save</button>
         <button class="btn btn-sync" id="sync-btn" onclick="triggerSync()">Sync Now</button>
@@ -556,6 +570,39 @@
         .catch(function() {
             render();
         });
+
+        function loadMqtt() {
+            fetch('/api/mqtt').then(function(r) { return r.json(); }).then(function(m) {
+                document.getElementById('mqtt-enabled').checked = !!m.enabled;
+                document.getElementById('mqtt-host').value = m.host || '';
+                document.getElementById('mqtt-port').value = m.port || 1883;
+                document.getElementById('mqtt-user').value = m.username || '';
+                document.getElementById('mqtt-pass').placeholder =
+                    m.has_password ? 'Password (leave blank to keep)' : 'Password (optional)';
+            }).catch(function() {});
+        }
+        loadMqtt();
+
+        function saveMqtt() {
+            var st = document.getElementById('mqtt-status');
+            st.textContent = 'Saving…';
+            fetch('/api/mqtt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    enabled: document.getElementById('mqtt-enabled').checked,
+                    host: document.getElementById('mqtt-host').value,
+                    port: document.getElementById('mqtt-port').value,
+                    username: document.getElementById('mqtt-user').value,
+                    password: document.getElementById('mqtt-pass').value
+                })
+            }).then(function(r) { return r.json(); }).then(function(res) {
+                st.textContent = res.ok
+                    ? 'Saved. If enabled, "mimir" appears in Home Assistant.'
+                    : ('Error: ' + (res.error || 'failed'));
+                document.getElementById('mqtt-pass').value = '';
+            }).catch(function() { st.textContent = 'Error saving'; });
+        }
     </script>
 </body>
 </html>

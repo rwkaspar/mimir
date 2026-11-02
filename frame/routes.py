@@ -163,6 +163,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.serve_version()
         elif path == '/api/access':
             self.serve_access_info()
+        elif path == '/api/mqtt':
+            self.serve_mqtt_config()
         elif path.startswith('/photos/'):
             photo_name = path[8:]  # Remove '/photos/' prefix
             self.serve_photo(photo_name)
@@ -183,6 +185,10 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.handle_save_schedule()
         elif self.path == '/wake':
             self.handle_wake()
+        elif self.path == '/sleep':
+            self.handle_sleep()
+        elif self.path == '/api/mqtt':
+            self.handle_save_mqtt()
         elif self.path == '/orientation':
             self.handle_save_orientation()
         elif self.path == '/brightness':
@@ -431,14 +437,12 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             data = json.loads(body)
             value = max(0, min(100, int(data.get('value', 100))))
 
-            def _apply():
-                try:
-                    subprocess.run(['sudo', 'ddcutil', 'setvcp', '10', str(value)],
-                                   capture_output=True, timeout=10)
-                except Exception as e:
-                    logger.warning(f"Failed to set brightness: {e}")
-
-            threading.Thread(target=_apply, daemon=True).start()
+            # Apply via the energy manager (shared with MQTT) off the request
+            # thread; ddcutil is slow (~0.5s) and the viewer debounces.
+            es = self.app.energy_save if self.app else None
+            if es:
+                threading.Thread(target=lambda: es.set_brightness(value),
+                                 daemon=True).start()
             self._json_response({'ok': True, 'value': value})
         except Exception as e:
             logger.error(f"Error setting brightness: {e}")
@@ -784,6 +788,63 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         if self.app and self.app.energy_save:
             self.app.energy_save.wake_display()
         self._json_response({'ok': True})
+
+    def handle_sleep(self):
+        """Put the display to sleep on demand (manual / Home Assistant 'off')."""
+        if self.app and self.app.energy_save:
+            self.app.energy_save.sleep_now()
+        self._json_response({'ok': True})
+
+    def serve_mqtt_config(self):
+        """Serve the MQTT/Home Assistant settings (password masked)."""
+        m = (self.app.config or {}).get('mqtt', {}) or {}
+        self._json_response({
+            'enabled': bool(m.get('enabled')),
+            'host': m.get('host', ''),
+            'port': int(m.get('port', 1883)),
+            'username': m.get('username', ''),
+            'has_password': bool(m.get('password')),
+        })
+
+    def handle_save_mqtt(self):
+        """Save MQTT settings and (re)start the Home Assistant bridge."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body)
+            with open(self.app.config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            m = cfg.setdefault('mqtt', {})
+            m['enabled'] = bool(data.get('enabled'))
+            m['host'] = (data.get('host') or '').strip()
+            m['port'] = int(data.get('port') or 1883)
+            m['username'] = (data.get('username') or '').strip()
+            # Only overwrite the stored password when a new one is supplied.
+            if data.get('password'):
+                m['password'] = data['password']
+            with open(self.app.config_path, 'w') as f:
+                yaml.dump(cfg, f, default_flow_style=False)
+            self.app.config['mqtt'] = m
+
+            self._restart_mqtt_bridge()
+            self._json_response({'ok': True})
+        except Exception as e:
+            logger.error(f"Error saving MQTT config: {e}")
+            self._json_response({'ok': False, 'error': str(e)}, 400)
+
+    def _restart_mqtt_bridge(self):
+        old = getattr(self.app, 'mqtt_bridge', None)
+        if old:
+            try:
+                old.stop()
+            except Exception:
+                pass
+        self.app.mqtt_bridge = None
+        if (self.app.config.get('mqtt', {}) or {}).get('enabled'):
+            from frame.mqtt_client import MqttBridge
+            bridge = MqttBridge(self.app)
+            if bridge.start():
+                self.app.mqtt_bridge = bridge
 
     def handle_save_schedule(self):
         """Save energy save schedule."""

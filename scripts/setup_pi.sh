@@ -277,6 +277,12 @@ nextcloud:
   share_passphrases: []
 energy_save:
   method: ddcci
+mqtt:
+  enabled: false
+  host: ''
+  port: 1883
+  username: ''
+  password: ''
 logging:
   level: INFO
   file: /var/log/photo_frame.log

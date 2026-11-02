@@ -134,8 +134,12 @@ class EnergySaveManager:
         # Sleep method from config
         config = app_state.config if app_state else {}
         self.method = config.get('energy_save', {}).get('method', 'ddcci')
+        self.brightness = int(config.get('energy_save', {}).get('brightness', 100))
         self._load()
         self._thread = None
+        # Called whenever power/brightness state changes, so the MQTT bridge can
+        # push the new state to Home Assistant. Set by the bridge if enabled.
+        self.on_state_change = None
 
     def start(self):
         """Start the sleep-check loop. Call after syncer is initialized."""
@@ -187,9 +191,38 @@ class EnergySaveManager:
         self._check()
 
     def wake_display(self):
-        """Wake display immediately."""
+        """Wake display immediately (runs the heavy wake off-thread)."""
         if self.sleeping:
-            self._set_sleep(False)
+            threading.Thread(target=lambda: self._set_sleep(False), daemon=True).start()
+
+    def sleep_now(self):
+        """Put the display to sleep immediately (HA/manual 'off')."""
+        if not self.sleeping:
+            threading.Thread(target=lambda: self._set_sleep(True), daemon=True).start()
+
+    def set_brightness(self, value):
+        """Set the display backlight brightness (0-100) via DDC/CI (VCP 10)."""
+        value = max(0, min(100, int(value)))
+        self.brightness = value
+        try:
+            subprocess.run(['sudo', 'ddcutil', 'setvcp', '10', str(value)],
+                           capture_output=True, timeout=10)
+        except Exception as e:
+            logger.warning(f"Failed to set brightness: {e}")
+        self._notify_state()
+        return value
+
+    def get_brightness(self):
+        return self.brightness
+
+    def _notify_state(self):
+        """Tell the MQTT bridge (if any) that power/brightness state changed."""
+        cb = self.on_state_change
+        if cb:
+            try:
+                cb()
+            except Exception as e:
+                logger.debug(f"state-change callback failed: {e}")
 
     def _wayland_env(self):
         """Get environment with Wayland display vars for wlr-randr/wlopm."""
@@ -238,6 +271,7 @@ class EnergySaveManager:
         try:
             if sleep and not self.sleeping:
                 self.sleeping = True
+                self._notify_state()  # reflect "off" in HA immediately
                 # Stop cage to free RAM (returns to Linux console/framebuffer)
                 subprocess.run(['sudo', 'systemctl', 'stop', 'photo_frame_cage'],
                              capture_output=True, timeout=15)
@@ -291,6 +325,7 @@ class EnergySaveManager:
                 self._backlight_on()
                 self.sleeping = False
                 logger.info(f"Wake: started display service ({self.method})")
+                self._notify_state()  # reflect "on" in HA
         except Exception as e:
             logger.error(f"Sleep control error: {e}")
 

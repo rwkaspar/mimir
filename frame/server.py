@@ -76,6 +76,13 @@ def main():
     # _set_sleep triggers before syncer is initialized)
     app.energy_save.start()
 
+    # Home Assistant integration over MQTT (optional).
+    app.mqtt_bridge = None
+    if (config.get('mqtt', {}) or {}).get('enabled'):
+        from frame.mqtt_client import MqttBridge
+        app.mqtt_bridge = MqttBridge(app)
+        app.mqtt_bridge.start()
+
     handler = create_handler(app, photos_dir, viewer_dir, slideshow_config)
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(('0.0.0.0', port), handler)
