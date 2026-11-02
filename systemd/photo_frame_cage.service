@@ -18,8 +18,9 @@ ExecStartPre=/bin/mkdir -p /tmp/frame-runtime
 ExecStartPre=/bin/chmod 700 /tmp/frame-runtime
 ExecStartPre=/bin/sleep 5
 # Quit Plymouth at the last moment (its spinner animates until now) and retain
-# its frame, so swaybg/Chromium take over with no black gap.
-ExecStartPre=-/usr/bin/plymouth quit --retain-splash
+# its frame, so swaybg/Chromium take over with no black gap. The '+' runs it as
+# root (ExecStartPre otherwise runs as User= and plymouth quit needs root).
+ExecStartPre=+-/usr/bin/plymouth quit --retain-splash
 ExecStart=/usr/bin/labwc -s /bin/true
 Restart=on-failure
 RestartSec=10
