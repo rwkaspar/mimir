@@ -853,12 +853,28 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self._json_response({'ok': True, 'sync_triggered': not has_photos})
 
             if new_orientation != old_orientation:
-                def restart_cage():
+                repo_dir = Path(__file__).resolve().parent.parent
+                splash_script = repo_dir / 'scripts' / 'install_bootsplash.sh'
+                config_path = self.app.config_path
+
+                def apply_orientation():
                     time.sleep(1)
                     subprocess.run(['sudo', 'systemctl', 'restart', 'photo_frame_cage'],
                                  capture_output=True, timeout=15)
                     logger.info(f"Orientation changed to {new_orientation}, restarted cage")
-                threading.Thread(target=restart_cage, daemon=True).start()
+                    # Re-skin the boot splash for the new orientation so it
+                    # matches on the next boot/shutdown. Slow (rebuilds
+                    # initramfs) but orientation changes are rare.
+                    if splash_script.exists():
+                        try:
+                            subprocess.run(
+                                ['sudo', str(splash_script),
+                                 new_orientation, str(config_path)],
+                                capture_output=True, timeout=180)
+                            logger.info(f"Boot splash rebuilt for {new_orientation}")
+                        except Exception as e:
+                            logger.warning(f"Boot splash rebuild failed: {e}")
+                threading.Thread(target=apply_orientation, daemon=True).start()
         except Exception as e:
             logger.error(f"Error saving orientation: {e}")
             self.send_error(400, str(e))
