@@ -23,7 +23,7 @@ fi
 
 /usr/lib/chromium/chromium \
     --kiosk \
-    --default-background-color=000000 \
+    --default-background-color=ff000000 \
     --noerrdialogs \
     --disable-infobars \
     --no-first-run \
