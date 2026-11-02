@@ -1,0 +1,35 @@
+# Photo Frame boot splash: centered logo with a rotating spinner.
+#
+# The panel is always driven in its native landscape framebuffer; for a
+# vertically-mounted frame the installer pre-rotates logo.png and flips the
+# spinner offset, so the splash reads upright in either orientation. The
+# @SPIN_DX@/@SPIN_DY@ placeholders are filled in by install_bootsplash.sh.
+
+TWO_PI = 6.2831853;
+
+Window.SetBackgroundTopColor(0.0, 0.0, 0.0);
+Window.SetBackgroundBottomColor(0.0, 0.0, 0.0);
+
+cx = Window.GetWidth() / 2;
+cy = Window.GetHeight() / 2;
+
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetX(cx - logo.image.GetWidth() / 2);
+logo.sprite.SetY(cy - logo.image.GetHeight() / 2);
+
+spin.image = Image("spinner.png");
+spin.sprite = Sprite();
+spin.angle = 0.0;
+spin.cx = cx + (@SPIN_DX@);
+spin.cy = cy + (@SPIN_DY@);
+
+fun refresh_callback() {
+    spin.angle += 0.12;
+    if (spin.angle > TWO_PI) spin.angle -= TWO_PI;
+    img = spin.image.Rotate(spin.angle);
+    spin.sprite.SetImage(img);
+    spin.sprite.SetX(spin.cx - img.GetWidth() / 2);
+    spin.sprite.SetY(spin.cy - img.GetHeight() / 2);
+}
+Plymouth.SetRefreshFunction(refresh_callback);

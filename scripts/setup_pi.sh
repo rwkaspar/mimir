@@ -139,7 +139,7 @@ if ! ping -c 1 -W 5 8.8.8.8 &>/dev/null; then
 fi
 
 # ---- System packages (with retry) ----
-PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm seatd chromium ddcutil i2c-tools network-manager libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg"
+PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm seatd chromium ddcutil i2c-tools network-manager libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg plymouth plymouth-themes"
 
 MISSING_PKGS=""
 for pkg in $PACKAGES; do
@@ -424,6 +424,13 @@ fi
 CONFIG="/boot/firmware/config.txt"
 if [ -f "$CONFIG" ] && ! grep -q "^disable_splash=1" "$CONFIG"; then
     printf "\n# Hide firmware rainbow splash\ndisable_splash=1\n" >> "$CONFIG"
+fi
+
+# ---- Boot splash (Plymouth: logo + spinner, rotated to the orientation) ----
+if [ -f "${REPO_DIR}/scripts/install_bootsplash.sh" ]; then
+    echo "Installing boot splash..."
+    bash "${REPO_DIR}/scripts/install_bootsplash.sh" "" "${REPO_DIR}/config_frame.yaml" \
+        || echo "WARNING: boot splash install failed (non-fatal)"
 fi
 
 # Disable login prompt on tty1 (permanently)

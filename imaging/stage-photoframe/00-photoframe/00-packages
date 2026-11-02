@@ -17,3 +17,5 @@ libheif-dev
 fonts-noto-color-emoji
 ffmpeg
 zram-tools
+plymouth
+plymouth-themes

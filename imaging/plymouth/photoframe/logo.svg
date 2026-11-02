@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Placeholder brand mark for the boot splash. Neutral, monochrome, reads on
+     black. Replace with a real logo later (keep it light-on-transparent). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="620" viewBox="0 0 560 620">
+  <g fill="none" stroke="#ededf0" stroke-width="14" stroke-linejoin="round" stroke-linecap="round">
+    <!-- picture frame -->
+    <rect x="130" y="70" width="300" height="300" rx="28"/>
+  </g>
+  <!-- photo glyph: sun + mountains, clipped to the frame -->
+  <clipPath id="inner"><rect x="144" y="84" width="272" height="272" rx="18"/></clipPath>
+  <g clip-path="url(#inner)">
+    <circle cx="210" cy="150" r="26" fill="#ededf0"/>
+    <path d="M144 330 L250 230 L300 280 L360 210 L416 300 L416 356 L144 356 Z" fill="#ededf0" opacity="0.92"/>
+  </g>
+  <text x="280" y="470" text-anchor="middle" font-family="DejaVu Sans, Helvetica, Arial, sans-serif"
+        font-size="68" font-weight="600" letter-spacing="2" fill="#ededf0">Photo</text>
+  <text x="280" y="548" text-anchor="middle" font-family="DejaVu Sans, Helvetica, Arial, sans-serif"
+        font-size="68" font-weight="300" letter-spacing="8" fill="#b9b9c2">FRAME</text>
+</svg>
