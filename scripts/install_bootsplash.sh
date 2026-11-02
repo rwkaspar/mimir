@@ -56,6 +56,18 @@ if [ -f "$CMDLINE" ]; then
     done
 fi
 
+# --- Seamless hand-off: retain the splash when Plymouth quits ---------------
+# Without this, Plymouth clears to black at the end of boot, leaving a blank
+# screen until the compositor/Chromium paints. --retain-splash freezes the
+# last frame (the logo) on screen until something draws over it.
+mkdir -p /etc/systemd/system/plymouth-quit.service.d
+cat > /etc/systemd/system/plymouth-quit.service.d/retain.conf <<'EOF'
+[Service]
+ExecStart=
+ExecStart=-/usr/bin/plymouth quit --retain-splash
+EOF
+systemctl daemon-reload 2>/dev/null || true
+
 # --- Activate + rebuild initramfs (so the theme ships in early boot) --------
 plymouth-set-default-theme -R photoframe
 echo "Boot splash installed. Takes effect on next reboot."

@@ -4,6 +4,23 @@
 # rotated layout correctly — our USB touch panel ignores compositor/udev
 # rotation. (See viewer/index.html .rotate-left.)
 
+# Seamless boot: paint the mimir logo on black as the compositor background so
+# there is no blank screen between the Plymouth splash and Chromium's first
+# paint. The logo is the orientation-correct one the boot splash installed.
+# Harmless if swaybg or the image is absent.
+SPLASH_IMG=/usr/share/plymouth/themes/photoframe/logo.png
+if command -v swaybg >/dev/null 2>&1 && [ -f "$SPLASH_IMG" ]; then
+    # Retry: at cold boot the output can be a moment behind labwc, so a single
+    # swaybg call may find no output and exit. Keep trying until it sticks
+    # (a successful swaybg never returns). Give up after a few seconds.
+    # Retry briefly in case the output is a moment behind labwc at cold boot
+    # (a successful swaybg never returns).
+    ( for i in 1 2 3 4 5; do
+          swaybg -m center -c 000000 -i "$SPLASH_IMG" && break
+          sleep 1
+      done ) &
+fi
+
 /usr/lib/chromium/chromium \
     --kiosk \
     --noerrdialogs \

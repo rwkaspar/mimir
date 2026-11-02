@@ -62,6 +62,34 @@
             justify-content: center;
         }
 
+        /* Boot/loading splash: the mimir logo on black, shown until the first
+         * photo is ready. It is a child of <body>, so in vertical mode it
+         * rotates with the UI and matches the Plymouth/swaybg boot splash —
+         * making the whole boot a seamless hand-off with no black gap. */
+        #boot-splash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            z-index: 2000;
+            opacity: 1;
+            transition: opacity 0.6s ease;
+        }
+        #boot-splash.hide {
+            opacity: 0;
+            pointer-events: none;
+        }
+        #boot-splash svg {
+            width: 38%;
+            max-width: 360px;
+            height: auto;
+        }
+
         .photo {
             position: absolute;
             max-width: 100%;
@@ -312,6 +340,14 @@
             max-width: 520px;
         }
 
+        .menu-brand {
+            text-align: center;
+            margin: 2px 0 6px;
+        }
+        .menu-brand svg {
+            height: 48px;
+            width: auto;
+        }
         #settings-overlay h1 {
             font-size: 24px;
             margin-bottom: 24px;
@@ -728,6 +764,21 @@
     <div id="loading"></div>
     <div id="error"></div>
     <div id="slideshow"></div>
+
+    <!-- Boot/loading splash (mimir lens mark + wordmark). Hidden once the first
+         photo is shown; see hideBootSplash(). -->
+    <div id="boot-splash">
+        <svg viewBox="0 0 520 360" xmlns="http://www.w3.org/2000/svg" aria-label="mimir">
+            <g fill="none" stroke="#ededf0" stroke-linecap="round">
+                <circle cx="260" cy="116" r="64" stroke-width="11"/>
+                <circle cx="260" cy="116" r="34" stroke-width="9"/>
+            </g>
+            <circle cx="260" cy="116" r="12" fill="#ededf0"/>
+            <text x="260" y="300" text-anchor="middle"
+                  font-family="Arial, Helvetica, sans-serif"
+                  font-size="86" font-weight="500" letter-spacing="8" fill="#ededf0">mimir</text>
+        </svg>
+    </div>
     <div id="clock-overlay">00:00</div>
     <div id="touch-warning" style="display:none; position:fixed; bottom:8px; left:50%; transform:translateX(-50%); background:rgba(200,50,50,0.85); color:#fff; padding:6px 16px; border-radius:16px; font-size:13px; z-index:5; pointer-events:none;">&#9888; Touchscreen not detected — check USB</div>
     <div id="sleep-overlay"></div>
@@ -737,6 +788,17 @@
 
         <!-- Main Page -->
         <div id="settings-main" class="settings-page">
+            <div class="menu-brand" aria-label="mimir">
+                <svg viewBox="0 0 330 84" xmlns="http://www.w3.org/2000/svg">
+                    <g fill="none" stroke="#ededf0" stroke-linecap="round">
+                        <circle cx="42" cy="42" r="30" stroke-width="8"/>
+                        <circle cx="42" cy="42" r="16" stroke-width="6"/>
+                    </g>
+                    <circle cx="42" cy="42" r="6" fill="#ededf0"/>
+                    <text x="86" y="59" font-family="Arial, Helvetica, sans-serif"
+                          font-size="50" font-weight="500" letter-spacing="5" fill="#ededf0">mimir</text>
+                </svg>
+            </div>
             <h1>Settings</h1>
             <div class="settings-section">
                 <div class="info-grid">
@@ -2026,6 +2088,18 @@
             }
         }
 
+        let bootSplashHidden = false;
+        function hideBootSplash() {
+            if (bootSplashHidden) return;
+            bootSplashHidden = true;
+            const el = document.getElementById('boot-splash');
+            if (!el) return;
+            el.classList.add('hide');
+            setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 700);
+        }
+        // Safety net: never let the splash stick if photos fail to load.
+        setTimeout(hideBootSplash, 20000);
+
         async function showPhoto(photoPath) {
             const slideshow = document.getElementById('slideshow');
             try {
@@ -2053,6 +2127,7 @@
                 slideshow.appendChild(newElem);
                 await new Promise(resolve => setTimeout(resolve, 50));
                 newElem.classList.add('active');
+                hideBootSplash();  // first real photo is up — fade out the logo
                 if (newElem._fg) {
                     try { await newElem._fg.play(); } catch (e) {}
                 }

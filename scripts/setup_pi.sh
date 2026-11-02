@@ -139,7 +139,7 @@ if ! ping -c 1 -W 5 8.8.8.8 &>/dev/null; then
 fi
 
 # ---- System packages (with retry) ----
-PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm seatd chromium ddcutil i2c-tools network-manager libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg plymouth plymouth-themes"
+PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm swaybg seatd chromium ddcutil i2c-tools network-manager libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg plymouth plymouth-themes"
 
 MISSING_PKGS=""
 for pkg in $PACKAGES; do
@@ -329,6 +329,7 @@ Environment="XDG_CONFIG_HOME=${REPO_DIR}"
 Environment="XCURSOR_PATH=${REPO_DIR}/labwc/icons"
 Environment="XCURSOR_THEME=empty"
 Environment="XCURSOR_SIZE=1"
+ExecStartPre=-/usr/bin/plymouth quit --retain-splash
 ExecStartPre=/bin/mkdir -p /tmp/frame-runtime
 ExecStartPre=/bin/chmod 700 /tmp/frame-runtime
 ExecStartPre=/bin/sleep 5
