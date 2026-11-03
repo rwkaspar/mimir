@@ -13,9 +13,9 @@
 ## Goal
 
 Let someone send a photo to a mimir frame **from anywhere**, with **no VPN and
-no port-forwarding** on the user's side. This is the paid, hosted convenience
-described in [`MONETIZATION.md`](MONETIZATION.md); self-hosters keep using their
-own VPN for free.
+no port-forwarding** on the user's side. Connect is a **free feature** (not a
+paywall — see [`MONETIZATION.md`](MONETIZATION.md)); the managed relay is free
+for basic send and enthusiasts can self-host their own.
 
 ## Constraints & decisions
 

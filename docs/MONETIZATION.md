@@ -5,87 +5,89 @@
 
 ## TL;DR
 
-Open-source core (AGPL-3.0 + CLA). **Don't** rely on the Immich-style "pay to
-support" honour license as the main revenue — mimir's audience is more
-consumer than self-hoster, so that converts poorly. Instead:
+Open-source core (AGPL-3.0 + CLA). **The business is hardware/convenience, not
+a subscription.** Remote access is too weak to charge for on its own, and the
+photo-frame category punishes subscriptions (the market leader, Aura, has none
+and markets "no fees" as a feature).
 
-1. **Lead with hardware/convenience** (pre-flashed SD cards, assembled frames) —
-   immediate revenue, low infrastructure.
-2. **Recurring revenue later via "mimir Connect"** — an optional hosted service
-   for remote photo-sending / remote access. Self-hosters keep doing it free.
-3. Keep an optional supporter license on top for goodwill.
+1. **Primary revenue: hardware & convenience** — pre-flashed SD images and
+   assembled frames. This is where Aura makes its money, and mimir's
+   open-source + privacy angle is the differentiator.
+2. **mimir Connect is a free feature**, not a paywall — it makes the product
+   good (effortless photo sending). Self-hosters run their own relay for free.
+3. **Optional recurring revenue only for real-cost add-ons**, later and
+   uncertain: encrypted cloud backup, or a "family plan" (many frames + lots of
+   storage). Basic "send a photo to the frame" stays free.
 
-**Where to draw the line:** never gate *local* features. Cut at
-**hardware/convenience** and **hosted service**, not at software capability.
+**Positioning:** *"mimir — your photos, your frame. No subscription, no cloud
+lock-in."* Aim it straight at the subscription cloud frames.
+
+## Why not a remote-access subscription
+
+We considered charging for remote access / "send from anywhere" and rejected it:
+
+- **It overlaps with what's already free.** A frame pointed at a shared album
+  (Immich/Synology/Google/Nextcloud) already gets new photos the family adds
+  from anywhere. "Send one photo right now" is a nice-to-have, not a monthly
+  need.
+- **Low frequency → low willingness to pay.** People don't consciously "use
+  remote access" often. The real value is passive ("the frame stays effortlessly
+  fed"), which is hard to pin a per-month price on.
+- **The category resists subscriptions.** Aura deliberately has no fees and
+  uses that as a selling point; Nixplay/Skylight charge and draw recurring
+  backlash. A subscription is a liability here, not an asset.
+- **The buyer who pays is the gifter, not the self-hoster.** Self-hosters will
+  never pay (they DIY). The adult child buying a frame for a parent pays for
+  *zero-hassle hardware*, like they would for an Aura.
 
 ## 1. License: AGPL-3.0 + CLA
 
 | Building block | What it does | Why |
 |---|---|---|
-| **AGPL-3.0** | Anyone may use/modify/redistribute, **but must publish changes** — even when offering mimir only as a network service | Stops anyone from reselling mimir closed-source as a cloud frame. Strongest protection for the open-source promise |
-| **CLA** (Contributor License Agreement) | Contributors assign rights to the mimir entity | Keeps the right to **relicense commercially / for OEM** later (e.g. a hardware partner who won't accept AGPL) |
+| **AGPL-3.0** | Anyone may use/modify/redistribute, **but must publish changes** — even when offering it only as a network service | Protects the open-source core against closed-source resale. Same license on device + relay |
+| **CLA** (Contributor License Agreement) | Contributors assign rights to the mimir entity | Keeps the right to **relicense commercially / for OEM** later |
 
-**Trade-off:** some FOSS contributors dislike CLAs. The milder option is **DCO
-only** (origin attestation) — but then no later relicensing is possible. We
-choose **CLA** to keep OEM/commercial options open. See [`CLA.md`](../CLA.md).
+See [`CLA.md`](../CLA.md). Trade-off and the DCO alternative are noted there.
 
-## 2. Free (self-hosted) vs. mimir Connect (hosted)
+## 2. Products & rough pricing (EUR)
 
-**Rule: nothing local is gated.** Everything that runs on the Pi in the home
-network is free. Payment is only for what needs *infrastructure we run*.
-
-| Free — self-hosted (AGPL) | mimir Connect — paid (subscription) |
-|---|---|
-| Slideshow, orientation, sleep schedule, brightness | **Send photos to the frame from anywhere** (no VPN / port-forward) |
-| All self-hosted sources (Immich, Synology, Nextcloud, iCloud/Google share links) | **"Magic link" for grandma** — send photos without an account |
-| Local albums, QR send **on the LAN** | **Remote management** of multiple frames (household dashboard) |
-| Home Assistant / MQTT | Optional **encrypted cloud backup** of the frame's library |
-| Full web UI on the home network | Email-to-frame, push notifications |
-
-The remote access we removed Tailscale for becomes the **paid convenience**
-here; self-hosters still DIY it for free.
-
-## 3. Products & rough pricing (EUR)
-
-| Product | Price (start) | Revenue type | Effort/infra |
+| Product | Price (start) | Revenue type | Notes |
 |---|---|---|---|
-| **mimir OS image** (download) | **€0** | — (reach/trust) | low |
-| **Pre-flashed SD card** + quick-start guide | **€19–29** | one-off | low |
-| **Assembled frame** (Pi + display + case) | **€149–249** (by size) | one-off, **main revenue** | medium (fulfilment) |
-| **mimir Connect** | Free tier (1 frame) · **Plus €3–5/mo** or **€29–39/yr** per household | **recurring** | **lower than assumed — see §5** |
-| **Supporter license** (software-only) | one-off **€25–49**, optional, **no paywall** | goodwill | low |
+| **mimir OS image** (download) | **€0** | — (reach/trust) | the open device software |
+| **Pre-flashed SD card** + quick-start | **€19–29** | one-off | pay for not-flashing |
+| **Assembled frame** (Pi + display + case) | **€149–249** | one-off, **main revenue** | where Aura makes money; our privacy/open angle differentiates |
+| **mimir Connect** (send photos remotely) | **€0 — free feature** | — | self-hostable relay; managed hosting on neotactiq, also free for basic send |
+| **Cloud backup / Family plan** *(optional, later)* | **TBD** (~€2–4/mo or one-off) | recurring, **uncertain** | only the parts with real storage cost; validate demand first |
+| **Supporter license** (software-only) | one-off **€25–49**, optional, no paywall | goodwill | for the self-hoster crowd |
+
+## 3. mimir Connect — role & infra
+
+Connect is a **free feature** that makes the frame effortless to feed (see
+[`CONNECT.md`](CONNECT.md)). It is **not** the business model.
+
+- **Code:** separate repo `mimir-connect` (AGPL-3.0, self-hostable). Private for
+  now (pre-launch); can go public at launch to invite self-hosting.
+- **Hosting:** official managed relay reuses existing neotactiq servers at
+  `connect.neotactiq.ai` — offered **free for basic send**. Enthusiasts point
+  their frame at their own relay via `connect.relay_url`.
+- The only thing worth charging for later is **durable encrypted cloud backup**
+  (real ongoing storage cost) — and only if buyers actually ask for it.
 
 ## 4. Rollout order
 
-1. **Now:** set AGPL-3.0 + CLA, clean repo, finish the **ready-to-flash image**
-   → trust + reach. Cheap.
-2. **Early & profitable:** sell pre-flashed cards / assembled frames →
-   **immediate revenue, little infra**. Carries the project while the user base
-   is small.
-3. **Then:** build mimir Connect → **recurring revenue**. Feasible earlier than
-   first thought because infrastructure already exists (see §5).
+1. **Now:** AGPL + CLA (done), finish the **ready-to-flash image** → reach +
+   trust. Cheap.
+2. **Early & profitable:** sell **pre-flashed cards / assembled frames** →
+   immediate revenue, little infra. This carries the project.
+3. **Keep Connect free** so the product feels effortless; run the managed relay
+   cheaply (relay-only, no stored media on the free path).
+4. **Only if validated:** add paid cloud backup / family plan.
 
-## 5. mimir Connect — infrastructure
+## 5. Open questions to validate
 
-We already run servers, and the domain can live under **neotactiq**
-(e.g. `connect.neotactiq.ai`). That removes the biggest objection to building
-Connect (standing up and paying for new infra), so it can move **earlier** in
-the roadmap than a from-scratch service would.
-
-- **Hosting:** reuse existing neotactiq servers.
-- **Domain:** `connect.neotactiq.ai` (or `mimir.neotactiq.ai`).
-- **Minimum viable Connect:** a relay that lets a phone send a photo to a frame
-  that's behind NAT — frame holds an outbound connection to the relay; no
-  port-forwarding on the user's side. Start with "send a photo", add
-  dashboard/backup later.
-- **Cost control:** relay only (no media stored) for the free tier; charge for
-  stored cloud backup, which is the part with real ongoing cost.
-
-## 6. Open questions to validate
-
-- Will target buyers pay for an assembled frame vs. buying a cheap commercial
-  cloud frame? (Positioning: privacy, no subscription, your photos stay yours.)
+- Will target buyers pay €149–249 for an open, private, **no-subscription**
+  frame vs. a cheap subscription cloud frame? (Positioning is the whole bet.)
 - Price elasticity on the assembled frame (€149 vs €249).
-- Connect: is "send from anywhere" alone worth €3–5/mo, or does it need cloud
-  backup to justify a subscription?
-- AGPL + CLA: acceptable to the contributors we want, or does it deter them?
+- Is there *any* real demand for paid cloud backup, or is "your photos stay on
+  your Pi" actually the selling point (i.e. no cloud at all)?
+- AGPL + CLA: acceptable to the contributors we want?
