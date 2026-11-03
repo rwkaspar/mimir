@@ -1,11 +1,13 @@
 # mimir Connect — MVP Spec
 
-> **Status:** Implemented MVP (2026-11-03). The relay (`connect/relay/`) and the
-> frame client (`frame/connect_client.py`) are built and tested end-to-end
+> **Status:** Implemented MVP (2026-11-03). The frame client
+> (`frame/connect_client.py`) and the relay are built and tested end-to-end
 > locally (register → control channel → send → pull → import → delete), and the
 > frame wires Connect in behind `connect.enabled` with a settings UI at
-> `/remote`. Still to do before production: deploy the relay to
-> `connect.neotactiq.ai`, swap the ephemeral JWT secret for a persistent one,
+> `/remote`. The **relay lives in its own repo**
+> (`mimir-connect`, AGPL-3.0, self-hostable) — the Pi auto-updates from this
+> repo on boot and must not ship server code. Still to do before production:
+> deploy the relay to `connect.neotactiq.ai`, set a persistent JWT secret,
 > optional sender PIN UI, and the paid tiers below.
 
 ## Goal
