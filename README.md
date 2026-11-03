@@ -34,7 +34,7 @@ Raspberry Pi Zero 2 W
 
 - **Multi-source sync** — pull from Synology Photos, Google Photos, and Immich shared albums simultaneously
 - **Self-contained Pi** — no NAS processing needed, everything runs on the Pi
-- **First-time setup wizard** — guided 7-step setup (language, WiFi, Tailscale, settings, sleep test, albums, done)
+- **First-time setup wizard** — guided setup (language, orientation, frame settings, sleep test, albums, done)
 - **WiFi hotspot fallback** — creates `PhotoFrame-Setup` hotspot with captive portal when no WiFi is available
 - **Auto-update on boot** — pulls latest code from GitHub before starting
 - **Orientation-aware** — processes photos only for the active orientation (horizontal/vertical), keeps 100 in the other as buffer
@@ -326,7 +326,15 @@ sudo systemctl restart photo_frame_cage
 
 ## License
 
-This project is open source and available under the MIT License.
+mimir is free and open source under the **GNU Affero General Public License
+v3.0** (AGPL-3.0) — see [`LICENSE`](LICENSE). You can self-host it freely; if you
+offer it to others over a network, you must make your changes available under
+the same license.
+
+Contributions are accepted under the [Contributor License Agreement](CLA.md),
+which lets the project also offer commercial/OEM licenses in the future. See
+[`docs/MONETIZATION.md`](docs/MONETIZATION.md) for the licensing &
+sustainability strategy.
 
 ## Building the image (maintainers)
 
