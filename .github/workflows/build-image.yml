@@ -52,7 +52,7 @@ jobs:
           fi
           URL="https://github.com/${{ github.repository }}.git"
           SCRIPT=imaging/stage-photoframe/00-photoframe/01-run-chroot.sh
-          sed -i "s|:-https://github.com/rwkaspar/digital_photo_frame.git}|:-${URL}}|" "$SCRIPT"
+          sed -i "s|:-https://github.com/rwkaspar/mimir.git}|:-${URL}}|" "$SCRIPT"
           sed -i "s|:-main}|:-${REF}}|" "$SCRIPT"
           echo "Baking ${URL}@${REF}"
           grep -E 'REPO_URL=|REPO_REF=' "$SCRIPT"
@@ -61,7 +61,7 @@ jobs:
         id: build
         uses: usimd/pi-gen-action@v1
         with:
-          image-name: digital-photo-frame
+          image-name: mimir
           pi-gen-version: arm64
           release: trixie
           stage-list: stage0 stage1 stage2 ./imaging/stage-photoframe
@@ -83,7 +83,7 @@ jobs:
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: digital-photo-frame-image
+          name: mimir-image
           path: ${{ steps.build.outputs.image-path }}
           if-no-files-found: error
 

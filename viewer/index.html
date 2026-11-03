@@ -1004,7 +1004,7 @@
             <div class="settings-section">
                 <div style="font-size:14px;color:#888;line-height:1.6;">
                     <div style="margin-bottom:8px;" id="about-license-text">Licensed under BUSL-1.1</div>
-                    <div style="color:#6af;font-size:13px;margin-bottom:8px;">github.com/rwkaspar/digital_photo_frame</div>
+                    <div style="color:#6af;font-size:13px;margin-bottom:8px;">github.com/rwkaspar/mimir</div>
                     <canvas id="about-qr" width="150" height="150" style="display:block;margin:0 auto;background:#fff;padding:8px;border-radius:8px;"></canvas>
                 </div>
             </div>
@@ -1580,7 +1580,7 @@
                 document.getElementById('about-version').textContent = data.version || '--';
                 document.getElementById('about-date').textContent = data.date || '--';
             } catch (e) {}
-            generateQR('https://github.com/rwkaspar/digital_photo_frame', document.getElementById('about-qr'), 3);
+            generateQR('https://github.com/rwkaspar/mimir', document.getElementById('about-qr'), 3);
         }
 
         function renderAlbumList(data) {

@@ -69,8 +69,8 @@ only if you want to build from source.
 
 ### Option A — Flash the ready-made image (recommended)
 
-1. Download the latest `digital-photo-frame-*.img.xz` from the
-   [Releases page](https://github.com/rwkaspar/digital_photo_frame/releases).
+1. Download the latest `mimir-*.img.xz` from the
+   [Releases page](https://github.com/rwkaspar/mimir/releases).
 2. Flash it with [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
    *Choose OS → Use custom* → pick the `.img.xz`. In the customization dialog
    set your **WiFi**, **locale/timezone**, and enable **SSH** if you want
@@ -83,7 +83,7 @@ only if you want to build from source.
 
 - **Target:** 64-bit (arm64), **Raspberry Pi Zero 2 W or newer**.
 - **Login:** user `frame`, password `photoframe` — change it after first login
-  (`passwd`). If SSH is enabled, reach it at `photoframe.local`.
+  (`passwd`). If SSH is enabled, reach it at `mimir.local`.
 
 ### Option B — Prepare an SD card from source
 
@@ -99,7 +99,7 @@ Works on **Windows**, **macOS**, and **Linux** — no ext4 access needed.
 3. **Run the prepare script:**
 
    **Windows** (no git required):
-   1. Download [`prepare_sd.bat`](https://raw.githubusercontent.com/rwkaspar/digital_photo_frame/main/scripts/prepare_sd.bat) (right-click → Save as)
+   1. Download [`prepare_sd.bat`](https://raw.githubusercontent.com/rwkaspar/mimir/main/scripts/prepare_sd.bat) (right-click → Save as)
    2. Open a terminal where you saved the file
    3. Run:
       ```cmd
@@ -110,7 +110,7 @@ Works on **Windows**, **macOS**, and **Linux** — no ext4 access needed.
 
    **Linux / macOS:**
    ```bash
-   git clone https://github.com/rwkaspar/digital_photo_frame.git
+   git clone https://github.com/rwkaspar/mimir.git digital_photo_frame
    cd digital_photo_frame
    bash scripts/prepare_sd.sh
    ```
@@ -136,7 +136,7 @@ Works on **Windows**, **macOS**, and **Linux** — no ext4 access needed.
 If you prefer to set up directly on the Pi:
 
 ```bash
-git clone https://github.com/rwkaspar/digital_photo_frame.git
+git clone https://github.com/rwkaspar/mimir.git digital_photo_frame
 cd digital_photo_frame
 sudo bash scripts/setup_pi.sh
 ```

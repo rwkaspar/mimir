@@ -463,7 +463,7 @@ chown -R "${FRAME_USER}:${FRAME_USER}" "${REPO_DIR}"
 # ---- Initialize git repo if missing (e.g. deployed from ZIP download) ----
 if [ ! -d "${REPO_DIR}/.git" ]; then
     echo "Initializing git repo for auto-update..."
-    su - "${FRAME_USER}" -c "cd ${REPO_DIR} && git init && git remote add origin https://github.com/rwkaspar/digital_photo_frame.git && git fetch origin main && git reset --mixed origin/main" 2>/dev/null || true
+    su - "${FRAME_USER}" -c "cd ${REPO_DIR} && git init && git remote add origin https://github.com/rwkaspar/mimir.git && git fetch origin main && git reset --mixed origin/main" 2>/dev/null || true
 fi
 
 # ---- Ensure git branch is 'main' with correct upstream ----

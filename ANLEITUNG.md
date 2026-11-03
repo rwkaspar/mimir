@@ -15,8 +15,8 @@ zeigt sie als Vollbild-Diashow.
 
 ## Schnellstart (fertiges Image)
 
-1. **Image herunterladen:** die neueste Datei `digital-photo-frame-*.img.xz`
-   von der [Releases-Seite](https://github.com/rwkaspar/digital_photo_frame/releases).
+1. **Image herunterladen:** die neueste Datei `mimir-*.img.xz`
+   von der [Releases-Seite](https://github.com/rwkaspar/mimir/releases).
 2. **Mit dem [Raspberry Pi Imager](https://www.raspberrypi.com/software/) flashen:**
    *OS wählen → Eigenes Image verwenden* → die `.img.xz` auswählen.
    Im Anpassungsdialog **WLAN**, **Sprache/Zeitzone** setzen und bei Bedarf
@@ -28,7 +28,7 @@ zeigt sie als Vollbild-Diashow.
    damit verbinden und der Anleitung im Browser folgen.
 
 **Zugang:** Benutzer `frame`, Passwort `photoframe` — nach dem ersten Login
-mit `passwd` ändern. Bei aktiviertem SSH erreichbar unter `photoframe.local`.
+mit `passwd` ändern. Bei aktiviertem SSH erreichbar unter `mimir.local`.
 
 ## Bedienung
 

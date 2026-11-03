@@ -8,7 +8,7 @@
 # user at build time: photo_frame_bootstrap.sh detects whatever user Pi Imager
 # created on first boot and sets everything up for it.
 
-REPO_URL="${PHOTOFRAME_REPO_URL:-https://github.com/rwkaspar/digital_photo_frame.git}"
+REPO_URL="${PHOTOFRAME_REPO_URL:-https://github.com/rwkaspar/mimir.git}"
 REPO_REF="${PHOTOFRAME_REPO_REF:-main}"
 BOOT_DIR="/boot/firmware"
 BOOT_REPO="${BOOT_DIR}/photo_frame"
@@ -28,6 +28,12 @@ chmod +x "${BOOT_DIR}/photo_frame_bootstrap.sh"
 
 # i2c-dev is needed for ddcutil (DDC/CI backlight control).
 echo "i2c-dev" > /etc/modules-load.d/i2c-dev.conf
+
+# Default hostname so the frame is reachable at mimir.local out of the box.
+# (Pi Imager's own hostname customization still overrides this if set.)
+echo "mimir" > /etc/hostname
+sed -i 's/127\.0\.1\.1.*/127.0.1.1\tmimir/' /etc/hosts 2>/dev/null || \
+    echo "127.0.1.1	mimir" >> /etc/hosts
 
 # Run the bootstrap once on first boot. It copies the repo to the user's home,
 # installs the full setup service (setup_pi.sh), and reboots into the frame.

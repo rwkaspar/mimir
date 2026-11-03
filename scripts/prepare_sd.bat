@@ -13,7 +13,7 @@ REM      (where F: is the boot partition drive letter)
 
 setlocal enabledelayedexpansion
 
-set "GITHUB_REPO=rwkaspar/digital_photo_frame"
+set "GITHUB_REPO=rwkaspar/mimir"
 set "BRANCH=main"
 set "ZIP_URL=https://github.com/%GITHUB_REPO%/archive/refs/heads/%BRANCH%.zip"
 
