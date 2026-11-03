@@ -35,7 +35,7 @@ Raspberry Pi Zero 2 W
 - **Multi-source sync** — pull from Synology Photos, Google Photos, and Immich shared albums simultaneously
 - **Self-contained Pi** — no NAS processing needed, everything runs on the Pi
 - **First-time setup wizard** — guided setup (language, orientation, frame settings, sleep test, albums, done)
-- **WiFi hotspot fallback** — creates `PhotoFrame-Setup` hotspot with captive portal when no WiFi is available
+- **WiFi hotspot fallback** — creates `mimir-Setup` hotspot with captive portal when no WiFi is available
 - **Auto-update on boot** — pulls latest code from GitHub before starting
 - **Orientation-aware** — processes photos only for the active orientation (horizontal/vertical), keeps 100 in the other as buffer
 - **Smart fill** — same-orientation photos crop to fill, cross-orientation get blur-fill backgrounds
@@ -78,7 +78,7 @@ only if you want to build from source.
 3. Insert the card and power on. The first boot provisions itself (a few
    minutes) and then shows the setup wizard.
 4. Configure your photo albums via the on-screen wizard — or, if no network
-   was set, connect to the **`PhotoFrame-Setup`** WiFi hotspot it creates and
+   was set, connect to the **`mimir-Setup`** WiFi hotspot it creates and
    follow the captive portal.
 
 - **Target:** 64-bit (arm64), **Raspberry Pi Zero 2 W or newer**.
@@ -244,7 +244,7 @@ digital_photo_frame/
 network-online.target
   → photo_frame_update.service  (git pull + pip install, fail-ok)
     → photo_frame_server.service  (frame.server)
-        IF no WiFi → hotspot "PhotoFrame-Setup" + captive portal
+        IF no WiFi → hotspot "mimir-Setup" + captive portal
         IF setup_complete=false → setup wizard
         IF normal → slideshow (no auto-sync)
       → photo_frame_cage.service  (labwc + Chromium kiosk)

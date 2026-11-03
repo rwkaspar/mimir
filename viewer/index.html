@@ -979,7 +979,7 @@
                 <div class="settings-section">
                     <div style="font-size:16px;color:#fff;line-height:1.8;text-align:center;">
                         <div style="margin-bottom:12px;" id="wifi-hotspot-instructions">Connect your phone to:</div>
-                        <div style="font-size:20px;font-weight:bold;color:#6af;">PhotoFrame-Setup</div>
+                        <div style="font-size:20px;font-weight:bold;color:#6af;">mimir-Setup</div>
                         <div style="font-size:14px;color:#888;margin-top:4px;">Password: <span style="color:#fff;">photoframe</span></div>
                         <div style="margin-top:16px;font-size:14px;color:#888;" id="wifi-hotspot-open">Then open in your browser:</div>
                         <div style="font-size:18px;color:#6af;margin-top:4px;" id="wifi-hotspot-url">http://10.42.0.1/setup</div>
@@ -1509,7 +1509,7 @@
                 const data = await resp.json();
                 if (data.mode === 'hotspot') {
                     document.getElementById('wifi-status-value').textContent = t('wifi_hotspot');
-                    document.getElementById('wifi-network-value').textContent = 'PhotoFrame-Setup';
+                    document.getElementById('wifi-network-value').textContent = 'mimir-Setup';
                     document.getElementById('wifi-normal-view').style.display = 'none';
                     document.getElementById('wifi-hotspot-view').style.display = 'block';
                 } else {
@@ -1534,7 +1534,7 @@
                 const data = await resp.json();
                 if (data.ok) {
                     document.getElementById('wifi-status-value').textContent = t('wifi_hotspot');
-                    document.getElementById('wifi-network-value').textContent = 'PhotoFrame-Setup';
+                    document.getElementById('wifi-network-value').textContent = 'mimir-Setup';
                     document.getElementById('wifi-normal-view').style.display = 'none';
                     document.getElementById('wifi-hotspot-view').style.display = 'block';
                     // Poll for WiFi reconnection
@@ -1980,7 +1980,7 @@
                                     '<div style="text-align:center;line-height:1.8">' +
                                     '<div style="font-size:32px;margin-bottom:20px">' + t('wifi_setup_required') + '</div>' +
                                     '<div style="font-size:24px;color:#aaa">' + t('connect_to') + '</div>' +
-                                    '<div style="font-size:28px;color:#6af;margin:8px 0">' + (wifi.hotspot_ssid || 'PhotoFrame-Setup') + '</div>' +
+                                    '<div style="font-size:28px;color:#6af;margin:8px 0">' + (wifi.hotspot_ssid || 'mimir-Setup') + '</div>' +
                                     '<div style="font-size:24px;color:#aaa">' + t('password') + '</div>' +
                                     '<div style="font-size:28px;color:#6af;margin:8px 0">' + (wifi.hotspot_password || 'photoframe') + '</div>' +
                                     '<div style="font-size:18px;color:#666;margin-top:20px">' + t('open_setup') + '</div>' +

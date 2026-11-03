@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-HOTSPOT_SSID = "PhotoFrame-Setup"
+HOTSPOT_SSID = "mimir-Setup"
 HOTSPOT_PASSWORD = "photoframe"
 PORT = 80
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))

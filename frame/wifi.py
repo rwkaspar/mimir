@@ -7,7 +7,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-HOTSPOT_SSID = 'PhotoFrame-Setup'
+HOTSPOT_SSID = 'mimir-Setup'
 HOTSPOT_PASSWORD = 'photoframe'
 HOTSPOT_CON_NAME = 'PhotoFrame-Hotspot'
 

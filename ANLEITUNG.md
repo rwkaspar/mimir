@@ -24,7 +24,7 @@ zeigt sie als Vollbild-Diashow.
 3. **Karte einlegen und Pi einschalten.** Der erste Start richtet sich selbst
    ein (ein paar Minuten) und zeigt dann den Einrichtungs-Assistenten.
 4. **Alben einrichten** über den Assistenten am Bildschirm. Falls kein WLAN
-   gesetzt wurde, spannt der Rahmen ein WLAN **`PhotoFrame-Setup`** auf —
+   gesetzt wurde, spannt der Rahmen ein WLAN **`mimir-Setup`** auf —
    damit verbinden und der Anleitung im Browser folgen.
 
 **Zugang:** Benutzer `frame`, Passwort `photoframe` — nach dem ersten Login
@@ -57,7 +57,7 @@ mit `passwd` ändern. Bei aktiviertem SSH erreichbar unter `mimir.local`.
 
 - **Kein Bild / nur Platzhalter:** Es sind noch keine Alben konfiguriert —
   Einstellungen öffnen und ein geteiltes Album hinzufügen.
-- **Kein WLAN:** Mit dem Hotspot `PhotoFrame-Setup` verbinden und WLAN im
+- **Kein WLAN:** Mit dem Hotspot `mimir-Setup` verbinden und WLAN im
   Browser-Portal eintragen.
 - **Touch reagiert nicht:** USB-Kabel des Touchscreens kurz ab- und wieder
   anstecken.

@@ -1206,7 +1206,7 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             if ok:
                 self._json_response({
                     'ok': True,
-                    'ssid': 'PhotoFrame-Setup',
+                    'ssid': 'mimir-Setup',
                     'password': 'photoframe',
                 })
                 logger.info("WiFi reconfigure: hotspot started")
