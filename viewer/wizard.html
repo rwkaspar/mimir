@@ -20,6 +20,9 @@
             display: flex;
             gap: 6px;
             padding: 20px 24px 0;
+            width: 100%;
+            max-width: 480px;
+            margin: 0 auto;
         }
         .progress-dot {
             flex: 1;
@@ -35,6 +38,9 @@
         .step {
             display: none;
             flex: 1;
+            width: 100%;
+            max-width: 480px;
+            margin: 0 auto;
             padding: 24px;
             padding-bottom: 100px;
             overflow-y: auto;
@@ -345,25 +351,8 @@
         </div>
     </div>
 
-    <!-- Step 3: Tailscale -->
+    <!-- Step 3: Frame Settings -->
     <div class="step" id="step-3">
-        <div class="step-title">Tailscale VPN</div>
-        <div class="step-subtitle" data-i18n="ts_subtitle">Connect to your home NAS securely</div>
-        <div class="ts-status" id="ts-status">
-            <div class="label" data-i18n="ts_checking">Checking...</div>
-        </div>
-        <div id="ts-actions"></div>
-        <div id="ts-qr"></div>
-        <div class="spacer"></div>
-        <div style="margin-top:16px;">
-            <button class="btn btn-primary" onclick="nextStep()" id="ts-next-btn" data-i18n="next">Next</button>
-            <button class="btn btn-skip" onclick="nextStep()" data-i18n="skip">Skip</button>
-            <button class="btn btn-back" onclick="prevStep()" data-i18n="back">Back</button>
-        </div>
-    </div>
-
-    <!-- Step 4: Frame Settings -->
-    <div class="step" id="step-4">
         <div class="step-title" data-i18n="settings_title">Frame Settings</div>
         <div class="step-subtitle" data-i18n="settings_subtitle_short">Name your frame and configure display</div>
         <label data-i18n="frame_name_label">Frame name</label>
@@ -407,8 +396,8 @@
         </div>
     </div>
 
-    <!-- Step 5: Sleep Mode -->
-    <div class="step" id="step-5">
+    <!-- Step 4: Sleep Mode -->
+    <div class="step" id="step-4">
         <div class="step-title" data-i18n="sleep_title">Sleep Mode</div>
         <div class="step-subtitle" data-i18n="sleep_subtitle_pick">How should the frame turn off the screen?</div>
         <div id="sleep-method-list"></div>
@@ -420,8 +409,8 @@
         </div>
     </div>
 
-    <!-- Step 6: Photo Albums -->
-    <div class="step" id="step-6">
+    <!-- Step 5: Photo Albums -->
+    <div class="step" id="step-5">
         <div class="step-title" data-i18n="albums_title">Photo Albums</div>
         <div class="step-subtitle" data-i18n="albums_subtitle_qr">Scan the QR code to add albums from your phone</div>
         <div id="album-qr-setup" style="text-align:center; margin-bottom:16px;">
@@ -438,8 +427,8 @@
         </div>
     </div>
 
-    <!-- Step 7: Done -->
-    <div class="step" id="step-7">
+    <!-- Step 6: Done -->
+    <div class="step" id="step-6">
         <div class="step-title" data-i18n="done_title">All Set!</div>
         <div class="step-subtitle" data-i18n="done_subtitle">Here's your configuration</div>
         <div id="summary"></div>
@@ -670,7 +659,7 @@
 
     // --- State ---
     var currentStep = 1;
-    var totalSteps = 7;
+    var totalSteps = 6;
     var selectedOrientation = 'horizontal';
     // Load current orientation from server
     fetch('/orientation').then(function(r) { return r.json(); }).then(function(d) {
@@ -691,11 +680,10 @@
         }
         updateProgress();
         // Step-specific init
-        if (n === 3) tailscaleInit();
-        if (n === 4) frameSettingsInit();
-        if (n === 5) sleepTestInit();
-        if (n === 6) { albumsRender(); startAlbumPolling(); }
-        if (n === 7) renderSummary();
+        if (n === 3) frameSettingsInit();
+        if (n === 4) sleepTestInit();
+        if (n === 5) { albumsRender(); startAlbumPolling(); }
+        if (n === 6) renderSummary();
     }
 
     function nextStep() {
@@ -1118,7 +1106,7 @@
     function startAlbumPolling() {
         if (albumPolling) clearInterval(albumPolling);
         albumPolling = setInterval(function() {
-            if (currentStep !== 6) { clearInterval(albumPolling); albumPolling = null; return; }
+            if (currentStep !== 5) { clearInterval(albumPolling); albumPolling = null; return; }
             albumsRender();
         }, 5000);
     }
@@ -1330,7 +1318,6 @@
         html += '<div class="summary-section">' +
             '<div class="section-title">' + t('summary_network') + '</div>' +
             '<div class="summary-row"><span class="label">' + t('wifi') + '</span><span class="value">' + (wifiConnected ? t('connected') : t('not_configured')) + '</span></div>' +
-            '<div class="summary-row"><span class="label">' + t('tailscale') + '</span><span class="value">' + (tailscaleIP || t('not_configured')) + '</span></div>' +
             '</div>';
         html += '<div class="summary-section">' +
             '<div class="section-title">' + t('summary_albums') + ' (' + albums.length + ')</div>';
@@ -1345,7 +1332,7 @@
     }
 
     function completeSetup() {
-        var btn = document.querySelector('#step-7 .btn-primary');
+        var btn = document.querySelector('#step-6 .btn-primary');
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>' + t('starting');
 
