@@ -259,20 +259,40 @@ def connectivity_watcher():
             os._exit(0)
 
 
+def _wifi_qr_escape(s):
+    """Escape SSID/password for the WIFI: QR payload (MECARD-style)."""
+    for ch in ("\\", ";", ",", ":", '"'):
+        s = s.replace(ch, "\\" + ch)
+    return s
+
+
+def wifi_qr_block():
+    """Return a terminal QR code (ANSI/UTF-8) that joins the setup hotspot,
+    or None if qrencode is unavailable (e.g. not installed yet)."""
+    payload = "WIFI:S:%s;T:WPA;P:%s;;" % (
+        _wifi_qr_escape(HOTSPOT_SSID), _wifi_qr_escape(HOTSPOT_PASSWORD))
+    out, rc = run_cmd(["qrencode", "-t", "ANSIUTF8", "-m", "2", payload], timeout=10)
+    if rc != 0 or not out.strip():
+        return None
+    return out
+
+
 def update_tty_display(gateway_ip):
-    """Show WiFi setup instructions with IP on the Pi's display."""
-    text = f"""
+    """Show WiFi setup instructions (and a scannable QR) on the Pi's display."""
+    qr = wifi_qr_block()
+    header = f"""
 
         ==========================================
 
            Photo Frame  -  WiFi Setup
 
-           1. On your phone, connect to:
-
-              WiFi:      {HOTSPOT_SSID}
-              Password:  {HOTSPOT_PASSWORD}
-
-           2. Open in your browser:
+           1. Scan this QR to join the setup WiFi
+              (or connect manually:
+               WiFi {HOTSPOT_SSID} / {HOTSPOT_PASSWORD})
+"""
+    footer = f"""
+           2. Your phone should open the setup page
+              automatically. If not, open:
 
               http://{gateway_ip}
 
@@ -285,7 +305,11 @@ def update_tty_display(gateway_ip):
     try:
         with open("/dev/tty1", "w") as tty:
             tty.write("\033[2J\033[H")  # clear screen + cursor home
-            tty.write(text)
+            tty.write(header)
+            if qr:
+                tty.write("\n")
+                tty.write(qr)
+            tty.write(footer)
     except Exception as e:
         log(f"[wifi-setup] Could not write to tty1: {e}")
 

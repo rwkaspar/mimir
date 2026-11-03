@@ -11,6 +11,7 @@ chromium
 ddcutil
 i2c-tools
 network-manager
+qrencode
 libjpeg-dev
 zlib1g-dev
 libffi-dev
