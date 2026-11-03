@@ -8,3 +8,4 @@ charset-normalizer==3.4.5
 idna==3.11
 urllib3==2.6.3
 paho-mqtt==2.1.0
+websockets==14.1

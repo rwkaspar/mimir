@@ -1,24 +1,25 @@
-"""mimir Connect — frame-side client (DRAFT skeleton).
+"""mimir Connect — frame-side client.
 
-Maintains the outbound control channel to the Connect relay (see
+Maintains an outbound WebSocket control channel to the Connect relay (see
 docs/CONNECT.md), pulls photos pushed to this frame, and imports them into the
 local photo library. Opt-in via config:
 
     connect:
       enabled: true
       relay_url: "https://connect.neotactiq.ai"
-      device_token: ""     # set once, after first register
-      pairing_code: ""     # returned by the relay
+      device_token: ""     # generated + persisted on first run
+      pairing_code: ""      # returned by the relay, persisted
 
-NOT wired into frame/server.py yet, and the happy path only. Degrades
-gracefully like the MQTT bridge: if the relay is unreachable the frame runs
-normally and retries with backoff.
+Degrades gracefully like the MQTT bridge: if the relay is unreachable the frame
+runs normally and retries with backoff. Requires the `websockets` package
+(installed only when Connect is used).
 """
 
 import json
 import logging
+import secrets
+import socket
 import threading
-import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -31,12 +32,30 @@ class ConnectClient:
         self.app = app
         cfg = (app.config or {}).get('connect', {}) or {}
         self.relay_url = cfg.get('relay_url', 'https://connect.neotactiq.ai').rstrip('/')
-        self.device_token = cfg.get('device_token', '') or getattr(app, 'access_token', '')
-        self.pairing_code = cfg.get('pairing_code', '')
+        self.device_token = cfg.get('device_token') or ''
+        self.pairing_code = cfg.get('pairing_code') or ''
         self.jwt = ''
         self._stop = threading.Event()
         self._thread = None
-        self.status = 'stopped'  # stopped|connecting|connected|error
+        self.status = 'stopped'  # stopped|connecting|connected|error|auth_failed
+        self._ensure_device_token()
+
+    # --- config persistence -------------------------------------------------
+    def _ensure_device_token(self):
+        if not self.device_token:
+            self.device_token = secrets.token_urlsafe(24)
+            self._save_cfg(device_token=self.device_token)
+
+    def _save_cfg(self, **kw):
+        try:
+            sec = self.app.config.setdefault('connect', {})
+            sec.update(kw)
+            self.app.save_config()
+        except Exception as e:
+            logger.warning(f"Connect: could not persist config: {e}")
+
+    def magic_link(self):
+        return f"{self.relay_url}/s/{self.pairing_code}" if self.pairing_code else ''
 
     # --- lifecycle ----------------------------------------------------------
     def start(self):
@@ -51,14 +70,12 @@ class ConnectClient:
         try:
             import asyncio
             asyncio.run(self._agent_loop())
-        except Exception as e:  # pragma: no cover - skeleton
+        except Exception as e:
             self.status = 'error'
             logger.warning(f"Connect client stopped: {e}")
 
     # --- registration -------------------------------------------------------
     def _register(self):
-        """POST /v1/register to obtain pairing code + JWT. TODO: persist."""
-        import socket
         data = urllib.parse.urlencode({
             'device_id': socket.gethostname(),
             'device_token': self.device_token,
@@ -68,8 +85,7 @@ class ConnectClient:
             body = json.loads(r.read().decode())
         self.pairing_code = body['pairing_code']
         self.jwt = body['jwt']
-        # TODO: write pairing_code back into config so the settings page can
-        # show the magic link https://connect.neotactiq.ai/s/<pairing_code>.
+        self._save_cfg(pairing_code=self.pairing_code)
         logger.info(f"Connect registered; pairing code {self.pairing_code}")
 
     # --- control channel ----------------------------------------------------
@@ -89,19 +105,27 @@ class ConnectClient:
                     self._register()
                 ws_url = (self.relay_url.replace('https://', 'wss://')
                           .replace('http://', 'ws://')
-                          + f"/v1/agent?pairing_code={self.pairing_code}&jwt={self.jwt}")
+                          + f"/v1/agent?pairing_code="
+                          + urllib.parse.quote(self.pairing_code)
+                          + f"&jwt={urllib.parse.quote(self.jwt)}")
                 self.status = 'connecting'
                 async with websockets.connect(ws_url) as ws:
                     self.status = 'connected'
                     backoff = 1
                     logger.info("Connect control channel up")
                     while not self._stop.is_set():
-                        msg = await asyncio.wait_for(ws.recv(), timeout=60)
+                        try:
+                            msg = await asyncio.wait_for(ws.recv(), timeout=45)
+                        except asyncio.TimeoutError:
+                            await ws.send('ping')
+                            continue
                         if msg.startswith('photo:'):
                             blob_id = msg.split(':', 1)[1]
                             if self._pull_and_import(blob_id):
                                 await ws.send(f"pulled:{blob_id}")
             except Exception as e:
+                # A rejected JWT (relay closes 4401) lands here; re-register next loop.
+                self.jwt = ''
                 self.status = 'error'
                 logger.debug(f"Connect channel retry in {backoff}s: {e}")
                 await asyncio.sleep(backoff)
@@ -124,7 +148,6 @@ class ConnectClient:
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(data)
             logger.info(f"Connect imported photo -> {dest}")
-            # TODO: trigger the viewer to refresh its playlist.
             return True
         except Exception as e:
             logger.warning(f"Connect import failed for {blob_id}: {e}")

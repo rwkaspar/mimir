@@ -1,8 +1,12 @@
 # mimir Connect — MVP Spec
 
-> **Status:** Draft (2026-11-03). Design first; the skeleton in `connect/` and
-> `frame/connect_client.py` implements the happy path only. Not wired into the
-> frame runtime yet.
+> **Status:** Implemented MVP (2026-11-03). The relay (`connect/relay/`) and the
+> frame client (`frame/connect_client.py`) are built and tested end-to-end
+> locally (register → control channel → send → pull → import → delete), and the
+> frame wires Connect in behind `connect.enabled` with a settings UI at
+> `/remote`. Still to do before production: deploy the relay to
+> `connect.neotactiq.ai`, swap the ephemeral JWT secret for a persistent one,
+> optional sender PIN UI, and the paid tiers below.
 
 ## Goal
 
@@ -84,7 +88,8 @@ own VPN for free.
 ## Frame side
 
 - `frame/connect_client.py` — maintains the WSS control channel, pulls blobs,
-  imports them. Opt-in: only runs when `connect.enabled: true` in config.
+  imports them. Opt-in: only started when `connect.enabled: true` in config
+  (wired in `frame/server.py`; managed from `/remote` via `/api/connect`).
 - Config block:
   ```yaml
   connect:

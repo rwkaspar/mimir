@@ -165,6 +165,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.serve_access_info()
         elif path == '/api/mqtt':
             self.serve_mqtt_config()
+        elif path == '/api/connect':
+            self.serve_connect_config()
         elif path.startswith('/photos/'):
             photo_name = path[8:]  # Remove '/photos/' prefix
             self.serve_photo(photo_name)
@@ -189,6 +191,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.handle_sleep()
         elif self.path == '/api/mqtt':
             self.handle_save_mqtt()
+        elif self.path == '/api/connect':
+            self.handle_save_connect()
         elif self.path == '/orientation':
             self.handle_save_orientation()
         elif self.path == '/brightness':
@@ -855,6 +859,63 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             bridge = MqttBridge(self.app)
             if bridge.start():
                 self.app.mqtt_bridge = bridge
+
+    def serve_connect_config(self):
+        """Serve mimir Connect settings + live status + pairing/magic link."""
+        cc = (self.app.config or {}).get('connect', {}) or {}
+        client = getattr(self.app, 'connect_client', None)
+        if not cc.get('enabled'):
+            status = 'disabled'
+        elif client is not None:
+            status = getattr(client, 'status', 'connecting')
+        else:
+            status = 'connecting'
+        pairing_code = getattr(client, 'pairing_code', '') if client else cc.get('pairing_code', '')
+        magic_link = client.magic_link() if client else ''
+        self._json_response({
+            'enabled': bool(cc.get('enabled')),
+            'relay_url': cc.get('relay_url', 'https://connect.neotactiq.ai'),
+            'status': status,
+            'pairing_code': pairing_code,
+            'magic_link': magic_link,
+        })
+
+    def handle_save_connect(self):
+        """Save mimir Connect settings and (re)start the client."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body)
+            with open(self.app.config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            cc = cfg.setdefault('connect', {})
+            cc['enabled'] = bool(data.get('enabled'))
+            if data.get('relay_url'):
+                cc['relay_url'] = data['relay_url'].strip().rstrip('/')
+            cc.setdefault('relay_url', 'https://connect.neotactiq.ai')
+            with open(self.app.config_path, 'w') as f:
+                yaml.dump(cfg, f, default_flow_style=False)
+            self.app.config['connect'] = cc
+
+            self._restart_connect_client()
+            self._json_response({'ok': True})
+        except Exception as e:
+            logger.error(f"Error saving Connect config: {e}")
+            self._json_response({'ok': False, 'error': str(e)}, 400)
+
+    def _restart_connect_client(self):
+        old = getattr(self.app, 'connect_client', None)
+        if old:
+            try:
+                old.stop()
+            except Exception:
+                pass
+        self.app.connect_client = None
+        if (self.app.config.get('connect', {}) or {}).get('enabled'):
+            from frame.connect_client import ConnectClient
+            client = ConnectClient(self.app)
+            if client.start():
+                self.app.connect_client = client
 
     def handle_save_schedule(self):
         """Save energy save schedule."""

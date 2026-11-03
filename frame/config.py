@@ -25,6 +25,7 @@ class AppState:
         self.sysinfo_cache = None
         self.wifi_manager = None
         self.mqtt_bridge = None
+        self.connect_client = None
         self.album_name_cache = {}  # url -> resolved album name
         self._album_cache_path = Path(self.config_path).parent / '.album_names.json'
         self._load_album_cache()

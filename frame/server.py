@@ -83,6 +83,13 @@ def main():
         app.mqtt_bridge = MqttBridge(app)
         app.mqtt_bridge.start()
 
+    # mimir Connect: remote photo-sending via the hosted relay (optional).
+    app.connect_client = None
+    if (config.get('connect', {}) or {}).get('enabled'):
+        from frame.connect_client import ConnectClient
+        app.connect_client = ConnectClient(app)
+        app.connect_client.start()
+
     handler = create_handler(app, photos_dir, viewer_dir, slideshow_config)
     HTTPServer.allow_reuse_address = True
     server = HTTPServer(('0.0.0.0', port), handler)

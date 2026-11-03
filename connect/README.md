@@ -1,10 +1,13 @@
-# mimir Connect (relay) — DRAFT skeleton
+# mimir Connect (relay)
 
 Server-side relay for [mimir Connect](../docs/CONNECT.md). Lets a phone send a
 photo to a frame behind NAT, with no port-forwarding on the user's side.
 
-**Status: draft skeleton — happy path only, in-memory stores, auth stubbed.**
-Not production ready. See `../docs/CONNECT.md` for the full design.
+**Status: working MVP.** SQLite + on-disk blobs, trust-on-first-use device
+auth, short-lived HS256 JWTs (`jwt_min.py`, stdlib), offline backlog delivery,
+per-pairing-code rate limiting. Tested end-to-end locally. Before production:
+set a persistent `RELAY_JWT_SECRET`, put it behind a TLS reverse proxy, and
+consider moving blobs to object storage. See `../docs/CONNECT.md`.
 
 ## Run locally (dev)
 

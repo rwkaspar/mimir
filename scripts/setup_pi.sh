@@ -283,6 +283,9 @@ mqtt:
   port: 1883
   username: ''
   password: ''
+connect:
+  enabled: false
+  relay_url: 'https://connect.neotactiq.ai'
 logging:
   level: INFO
   file: /var/log/photo_frame.log

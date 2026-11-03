@@ -186,6 +186,18 @@
         <div id="mqtt-status" style="margin-top:4px;font-size:13px;color:#8ad;"></div>
     </div>
 
+    <h2 class="section-header" id="r-connect-header">mimir Connect (remote photos)</h2>
+    <div class="album-card">
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+            <input type="checkbox" id="connect-enabled">
+            <span id="r-connect-enable">Let people send photos to this frame from anywhere</span>
+        </label>
+        <input type="text" id="connect-relay" placeholder="Relay URL (https://connect.neotactiq.ai)">
+        <button class="btn btn-save" id="r-connect-save" onclick="saveConnect()" style="margin-top:6px;">Save Connect</button>
+        <div id="connect-conn" style="margin-top:8px;font-size:13px;font-weight:600;color:#889;">Status: —</div>
+        <div id="connect-pairing" style="margin-top:6px;font-size:13px;color:#8ad;"></div>
+    </div>
+
     <div class="btn-row">
         <button class="btn btn-save" id="r-save" onclick="saveConfig()">Save</button>
         <button class="btn btn-sync" id="sync-btn" onclick="triggerSync()">Sync Now</button>
@@ -623,6 +635,59 @@
                     : ('Error: ' + (res.error || 'failed'));
                 document.getElementById('mqtt-pass').value = '';
             }).catch(function() { st.textContent = 'Error saving'; });
+        }
+
+        var CONNECT_STATUS = {
+            disabled: ['Disabled', '#889'],
+            connecting: ['Connecting…', '#da3'],
+            connected: ['✓ Connected to relay', '#3c6'],
+            auth_failed: ['✗ Not authorized', '#e55'],
+            error: ['✗ Relay unreachable', '#e55'],
+            stopped: ['Stopped', '#889']
+        };
+        function renderConnect(c) {
+            var el = document.getElementById('connect-conn');
+            if (el) {
+                var s = CONNECT_STATUS[c.status] || ['—', '#889'];
+                el.textContent = 'Status: ' + s[0];
+                el.style.color = s[1];
+            }
+            var p = document.getElementById('connect-pairing');
+            if (p) {
+                if (c.pairing_code) {
+                    p.innerHTML = 'Pairing code: <b>' + c.pairing_code + '</b>' +
+                        (c.magic_link ? '<br>Send link: <a href="' + c.magic_link +
+                        '" style="color:#8ad">' + c.magic_link + '</a>' : '');
+                } else {
+                    p.textContent = c.enabled ? 'Registering…' : '';
+                }
+            }
+        }
+        function loadConnect(fillInputs) {
+            fetch('/api/connect').then(function(r) { return r.json(); }).then(function(c) {
+                if (fillInputs) {
+                    document.getElementById('connect-enabled').checked = !!c.enabled;
+                    document.getElementById('connect-relay').value = c.relay_url || '';
+                }
+                renderConnect(c);
+            }).catch(function() {});
+        }
+        loadConnect(true);
+        setInterval(function() { loadConnect(false); }, 3000);
+
+        function saveConnect() {
+            var el = document.getElementById('connect-conn');
+            if (el) el.textContent = 'Saving…';
+            fetch('/api/connect', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    enabled: document.getElementById('connect-enabled').checked,
+                    relay_url: document.getElementById('connect-relay').value
+                })
+            }).then(function(r) { return r.json(); }).then(function() {
+                loadConnect(false);
+            }).catch(function() { if (el) el.textContent = 'Error saving'; });
         }
     </script>
 </body>
