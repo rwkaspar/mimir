@@ -82,6 +82,22 @@ class WiFiManager:
                      'connection.autoconnect-priority', '100'],
                     capture_output=True, timeout=10)
 
+                # Pin WPA2-PSK (RSN/CCMP) so the AP matches the setup WiFi QR
+                # (T:WPA) and every phone can join. NetworkManager on Trixie may
+                # otherwise bring the hotspot up as WPA3-SAE or with TKIP, which
+                # makes QR joins (and some phones) fail. Re-up to apply.
+                subprocess.run(
+                    ['nmcli', 'connection', 'modify', HOTSPOT_CON_NAME,
+                     '802-11-wireless-security.key-mgmt', 'wpa-psk',
+                     '802-11-wireless-security.proto', 'rsn',
+                     '802-11-wireless-security.pairwise', 'ccmp',
+                     '802-11-wireless-security.group', 'ccmp',
+                     '802-11-wireless-security.psk', HOTSPOT_PASSWORD],
+                    capture_output=True, timeout=10)
+                subprocess.run(
+                    ['nmcli', 'connection', 'up', HOTSPOT_CON_NAME],
+                    capture_output=True, timeout=15)
+
                 # Redirect port 80 -> 8080 for captive portal detection
                 subprocess.run(
                     ['sudo', 'iptables', '-t', 'nat', '-A', 'PREROUTING',

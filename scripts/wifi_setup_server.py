@@ -50,8 +50,23 @@ def get_gateway_ip():
 
 
 def start_hotspot():
-    run_cmd(["nmcli", "device", "wifi", "hotspot",
+    # Pin WPA2-PSK (RSN/CCMP) so the AP's security matches the WiFi QR (T:WPA)
+    # and every phone can join. NetworkManager on Trixie may otherwise bring the
+    # hotspot up as WPA3-SAE or with TKIP, which makes QR joins fail even though
+    # the phone recognises the code and offers to connect.
+    run_cmd(["nmcli", "connection", "delete", "hotspot"], timeout=10)
+    run_cmd(["nmcli", "device", "wifi", "hotspot", "con-name", "hotspot",
              "ssid", HOTSPOT_SSID, "password", HOTSPOT_PASSWORD])
+    run_cmd(["nmcli", "connection", "modify", "hotspot",
+             "802-11-wireless-security.key-mgmt", "wpa-psk",
+             "802-11-wireless-security.proto", "rsn",
+             "802-11-wireless-security.pairwise", "ccmp",
+             "802-11-wireless-security.group", "ccmp",
+             "802-11-wireless-security.psk", HOTSPOT_PASSWORD])
+    run_cmd(["nmcli", "connection", "up", "hotspot"])
+    sec, _ = run_cmd(["nmcli", "-g", "802-11-wireless-security.key-mgmt",
+                      "connection", "show", "hotspot"])
+    log(f"[wifi-setup] Hotspot '{HOTSPOT_SSID}' up (key-mgmt={sec})")
     # Captive portal: redirect all HTTP to us (phones try external URLs)
     run_cmd(["iptables", "-t", "nat", "-A", "PREROUTING",
              "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", str(PORT)])
