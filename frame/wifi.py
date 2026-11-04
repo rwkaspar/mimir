@@ -82,20 +82,6 @@ class WiFiManager:
                      'connection.autoconnect-priority', '100'],
                     capture_output=True, timeout=10)
 
-                # Pin key-mgmt to WPA2-PSK (exclude WPA3-SAE) so the AP matches
-                # the setup WiFi QR (T:WPA) and every phone can join. Only pin
-                # key-mgmt + psk and let the driver negotiate ciphers; forcing
-                # proto/pairwise/group can stop the Broadcom AP from completing
-                # the handshake. Re-up to apply.
-                subprocess.run(
-                    ['nmcli', 'connection', 'modify', HOTSPOT_CON_NAME,
-                     '802-11-wireless-security.key-mgmt', 'wpa-psk',
-                     '802-11-wireless-security.psk', HOTSPOT_PASSWORD],
-                    capture_output=True, timeout=10)
-                subprocess.run(
-                    ['nmcli', 'connection', 'up', HOTSPOT_CON_NAME],
-                    capture_output=True, timeout=15)
-
                 # Redirect port 80 -> 8080 for captive portal detection
                 subprocess.run(
                     ['sudo', 'iptables', '-t', 'nat', '-A', 'PREROUTING',

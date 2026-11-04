@@ -50,23 +50,22 @@ def get_gateway_ip():
 
 
 def start_hotspot():
-    # Pin WPA2-PSK (RSN/CCMP) so the AP's security matches the WiFi QR (T:WPA)
-    # and every phone can join. NetworkManager on Trixie may otherwise bring the
-    # hotspot up as WPA3-SAE or with TKIP, which makes QR joins fail even though
-    # the phone recognises the code and offers to connect.
-    run_cmd(["nmcli", "connection", "delete", "hotspot"], timeout=10)
+    # Clear any stale hotspot profile first. Otherwise `nmcli device wifi
+    # hotspot` can reuse an existing "Hotspot" connection (e.g. left over with
+    # the previous SSID) instead of broadcasting the SSID we show on screen and
+    # in the QR — then the phone looks for a network that isn't on the air and
+    # the join fails, manually and via QR.
+    for stale in ("hotspot", "Hotspot", "PhotoFrame-Setup"):
+        run_cmd(["nmcli", "connection", "delete", stale], timeout=10)
     run_cmd(["nmcli", "device", "wifi", "hotspot", "con-name", "hotspot",
              "ssid", HOTSPOT_SSID, "password", HOTSPOT_PASSWORD])
-    # Only pin key-mgmt to wpa-psk (exclude WPA3-SAE) and the psk; let the
-    # driver negotiate ciphers. Forcing proto/pairwise/group can stop the
-    # Broadcom AP from completing the handshake.
-    run_cmd(["nmcli", "connection", "modify", "hotspot",
-             "802-11-wireless-security.key-mgmt", "wpa-psk",
-             "802-11-wireless-security.psk", HOTSPOT_PASSWORD])
-    run_cmd(["nmcli", "connection", "up", "hotspot"])
-    sec, _ = run_cmd(["nmcli", "-g", "802-11-wireless-security.key-mgmt",
-                      "connection", "show", "hotspot"])
-    log(f"[wifi-setup] Hotspot '{HOTSPOT_SSID}' up (key-mgmt={sec})")
+    # Ground-truth log: what SSID is actually being broadcast now?
+    ssid, _ = run_cmd(["nmcli", "-g", "802-11-wireless.ssid",
+                       "connection", "show", "hotspot"])
+    active, _ = run_cmd(["nmcli", "-t", "-f", "NAME,DEVICE,STATE",
+                         "connection", "show", "--active"])
+    log(f"[wifi-setup] Hotspot up: broadcasting SSID={ssid!r} (expected {HOTSPOT_SSID!r})")
+    log(f"[wifi-setup] active connections: {active!r}")
     # Captive portal: redirect all HTTP to us (phones try external URLs)
     run_cmd(["iptables", "-t", "nat", "-A", "PREROUTING",
              "-p", "tcp", "--dport", "80", "-j", "REDIRECT", "--to-port", str(PORT)])
