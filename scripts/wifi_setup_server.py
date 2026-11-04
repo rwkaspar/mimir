@@ -57,11 +57,11 @@ def start_hotspot():
     run_cmd(["nmcli", "connection", "delete", "hotspot"], timeout=10)
     run_cmd(["nmcli", "device", "wifi", "hotspot", "con-name", "hotspot",
              "ssid", HOTSPOT_SSID, "password", HOTSPOT_PASSWORD])
+    # Only pin key-mgmt to wpa-psk (exclude WPA3-SAE) and the psk; let the
+    # driver negotiate ciphers. Forcing proto/pairwise/group can stop the
+    # Broadcom AP from completing the handshake.
     run_cmd(["nmcli", "connection", "modify", "hotspot",
              "802-11-wireless-security.key-mgmt", "wpa-psk",
-             "802-11-wireless-security.proto", "rsn",
-             "802-11-wireless-security.pairwise", "ccmp",
-             "802-11-wireless-security.group", "ccmp",
              "802-11-wireless-security.psk", HOTSPOT_PASSWORD])
     run_cmd(["nmcli", "connection", "up", "hotspot"])
     sec, _ = run_cmd(["nmcli", "-g", "802-11-wireless-security.key-mgmt",
