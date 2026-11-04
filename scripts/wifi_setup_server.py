@@ -292,38 +292,42 @@ def wifi_qr_block():
 
 
 def update_tty_display(gateway_ip):
-    """Show WiFi setup instructions (and a scannable QR) on the Pi's display."""
+    """Render a tidy WiFi-setup screen (with a scannable QR) on tty1."""
     qr = wifi_qr_block()
-    header = f"""
+    qr_block = ""
+    if qr:
+        # Indent the QR so it sits under the box; it already carries its own
+        # quiet-zone margin from qrencode (-m 2).
+        qr_block = "\n".join("        " + ln
+                             for ln in qr.rstrip("\n").split("\n")) + "\n\n"
 
-        ==========================================
+    w = 42
+    def mid(s=""):
+        return "   │" + s.center(w) + "│"
+    box = "\n".join([
+        "   ┌" + "─" * w + "┐",
+        mid(), mid("m i m i r"), mid("WLAN-Einrichtung"), mid(),
+        "   └" + "─" * w + "┘",
+    ])
 
-           Photo Frame  -  WiFi Setup
-
-           1. Scan this QR to join the setup WiFi
-              (or connect manually:
-               WiFi {HOTSPOT_SSID} / {HOTSPOT_PASSWORD})
-"""
-    footer = f"""
-           2. Your phone should open the setup page
-              automatically. If not, open:
-
-              http://{gateway_ip}
-
-           3. Choose your home WiFi network.
-
-           Setup will continue automatically.
-
-        ==========================================
-"""
+    screen = (
+        "\033[2J\033[H\n"            # clear screen + cursor home
+        + box + "\n\n\n"
+        "   1   QR-Code mit der Handy-Kamera scannen,\n"
+        "       um dich mit dem Einrichtungs-WLAN zu\n"
+        "       verbinden:\n\n"
+        + qr_block +
+        f"       manuell:   WLAN       {HOTSPOT_SSID}\n"
+        f"                  Passwort   {HOTSPOT_PASSWORD}\n\n\n"
+        "   2   Die Einrichtungsseite öffnet sich dann\n"
+        "       von selbst. Falls nicht, im Browser:\n\n"
+        f"                  http://{gateway_ip}\n\n\n"
+        "   3   Dein Heim-WLAN auswählen – danach läuft\n"
+        "       die Einrichtung automatisch weiter.\n"
+    )
     try:
         with open("/dev/tty1", "w") as tty:
-            tty.write("\033[2J\033[H")  # clear screen + cursor home
-            tty.write(header)
-            if qr:
-                tty.write("\n")
-                tty.write(qr)
-            tty.write(footer)
+            tty.write(screen)
     except Exception as e:
         log(f"[wifi-setup] Could not write to tty1: {e}")
 
