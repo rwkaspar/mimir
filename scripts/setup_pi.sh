@@ -139,7 +139,7 @@ if ! ping -c 1 -W 5 8.8.8.8 &>/dev/null; then
 fi
 
 # ---- System packages (with retry) ----
-PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm swaybg seatd chromium ddcutil i2c-tools network-manager dnsmasq-base iptables qrencode libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg plymouth plymouth-themes"
+PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm swaybg seatd cog ddcutil i2c-tools network-manager dnsmasq-base iptables qrencode libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg plymouth plymouth-themes"
 
 MISSING_PKGS=""
 for pkg in $PACKAGES; do
@@ -164,7 +164,7 @@ if [ -n "$MISSING_PKGS" ]; then
             install_packages || log "ERROR: apt-get install failed after 3 attempts"
         fi
     fi
-    for pkg in python3-dev labwc chromium seatd libheif-dev wlr-randr wlopm fonts-noto-color-emoji ddcutil ffmpeg; do
+    for pkg in python3-dev labwc cog seatd libheif-dev wlr-randr wlopm fonts-noto-color-emoji ddcutil ffmpeg; do
         if ! dpkg -s "$pkg" &>/dev/null; then
             log "WARNING: $pkg missing, attempting individual install..."
             apt-get install -y "$pkg" 2>&1 | tee -a "$SETUP_LOG" || log "WARNING: could not install $pkg"
@@ -323,7 +323,7 @@ EOF
 
 cat > /etc/systemd/system/photo_frame_cage.service << EOF
 [Unit]
-Description=Digital Photo Frame Viewer (labwc + Chromium)
+Description=Digital Photo Frame Viewer (labwc + cog/WPE)
 After=network.target photo_frame_server.service
 Wants=photo_frame_server.service
 Conflicts=display-manager.service

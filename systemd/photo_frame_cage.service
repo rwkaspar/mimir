@@ -1,5 +1,5 @@
 [Unit]
-Description=Digital Photo Frame Viewer (labwc + Chromium)
+Description=Digital Photo Frame Viewer (labwc + cog/WPE)
 After=network.target photo_frame_server.service
 Wants=photo_frame_server.service
 Conflicts=display-manager.service

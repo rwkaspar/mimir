@@ -5,7 +5,7 @@
 # rotation. (See viewer/index.html .rotate-left.)
 
 # Seamless boot: paint the mimir logo on black as the compositor background so
-# there is no blank screen between the Plymouth splash and Chromium's first
+# there is no blank screen between the Plymouth splash and the browser's first
 # paint. The logo is the orientation-correct one the boot splash installed.
 # Harmless if swaybg or the image is absent.
 SPLASH_IMG=/usr/share/plymouth/themes/photoframe/logo.png
@@ -21,24 +21,10 @@ if command -v swaybg >/dev/null 2>&1 && [ -f "$SPLASH_IMG" ]; then
       done ) &
 fi
 
-/usr/lib/chromium/chromium \
-    --kiosk \
-    --default-background-color=ff000000 \
-    --noerrdialogs \
-    --disable-infobars \
-    --no-first-run \
-    --check-for-update-interval=31536000 \
-    --disable-session-crashed-bubble \
-    --disable-features=TranslateUI \
-    --disable-component-update \
-    --disable-pinch \
-    --enable-features=VirtualKeyboard \
-    --ozone-platform=wayland \
-    --use-gl=angle \
-    --use-angle=gles \
-    --enable-gpu-rasterization \
-    --enable-zero-copy \
-    --ignore-gpu-blocklist \
-    --enable-accelerated-video-decode \
-    --enable-accelerated-2d-canvas \
-    http://localhost:8080/ &
+# Kiosk browser: cog (WPE WebKit), NOT Chromium. Chromium forces a GLES 3.0
+# context, which the Pi Zero 2 W's VideoCore IV (GLES 2.0 only) cannot provide,
+# so it never presents a frame (blank/frozen screen). cog/WPE renders fine on
+# VC4. Fullscreen via the Wayland platform; WEBKIT_DISABLE_COMPOSITING_MODE
+# avoids a black accelerated-layer artifact on VC4.
+WEBKIT_DISABLE_COMPOSITING_MODE=1 COG_PLATFORM_WL_VIEW_FULLSCREEN=1 \
+    cog --platform=wl http://localhost:8080/ &
