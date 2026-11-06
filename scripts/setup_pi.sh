@@ -351,6 +351,26 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
+# Hide the pointer cursor: the USB touch panel presents as a mouse so wlroots
+# draws a cursor, and WPE/cog doesn't honour the empty cursor theme. A single
+# synthetic touch tap after the kiosk is up makes wlroots hide the pointer.
+# Runs as root (no User=) because /dev/uinput requires it.
+cat > /etc/systemd/system/photo_frame_cursor_hide.service << EOF
+[Unit]
+Description=Hide mouse cursor on the kiosk (synthetic touch tap)
+After=photo_frame_cage.service
+Wants=photo_frame_cage.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 ${REPO_DIR}/scripts/cursor_hide_touch.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat > /etc/systemd/system/photo_frame_update.service << EOF
 [Unit]
 Description=Digital Photo Frame Auto-Update
@@ -454,7 +474,7 @@ assert_no_display_manager_conflict
 # ---- Enable services ----
 show "Almost done..."
 systemctl daemon-reload
-systemctl enable seatd photo_frame_server photo_frame_cage photo_frame_update.service photo_frame_update.timer
+systemctl enable seatd photo_frame_server photo_frame_cage photo_frame_cursor_hide.service photo_frame_update.service photo_frame_update.timer
 systemctl start seatd 2>/dev/null || true
 
 # ---- Set repo ownership ----
