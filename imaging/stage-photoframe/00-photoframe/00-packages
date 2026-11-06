@@ -8,6 +8,11 @@ wlopm
 swaybg
 seatd
 cog
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-libav
+gstreamer1.0-gl
 ddcutil
 i2c-tools
 network-manager

@@ -139,7 +139,7 @@ if ! ping -c 1 -W 5 8.8.8.8 &>/dev/null; then
 fi
 
 # ---- System packages (with retry) ----
-PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm swaybg seatd cog ddcutil i2c-tools network-manager dnsmasq-base iptables qrencode libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg plymouth plymouth-themes"
+PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm swaybg seatd cog gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-gl ddcutil i2c-tools network-manager dnsmasq-base iptables qrencode libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg plymouth plymouth-themes"
 
 MISSING_PKGS=""
 for pkg in $PACKAGES; do
