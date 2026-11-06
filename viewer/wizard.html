@@ -1346,11 +1346,13 @@
     }
 
     // --- Init ---
+    // Always restore the chosen language on load, not only when resuming a
+    // step — otherwise a plain reload falls back to English.
+    var savedLang = localStorage.getItem('frame-language');
+    if (savedLang) { lang = savedLang; applyI18n(); }
     var resumeStep = localStorage.getItem('wizard-step');
     if (resumeStep) {
         localStorage.removeItem('wizard-step');
-        var savedLang = localStorage.getItem('frame-language');
-        if (savedLang) { lang = savedLang; applyI18n(); }
         showStep(parseInt(resumeStep));
     } else {
         showStep(1);
