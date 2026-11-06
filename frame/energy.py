@@ -310,12 +310,21 @@ class EnergySaveManager:
                 syncer = self.app.syncer if self.app else None
                 if syncer:
                     syncer.stop()
-                    # Wait briefly for current subprocess to finish
+                    # A running video transcode blocks the sync in p.join() (up
+                    # to 20 min), so the stop flag alone won't free RAM in time.
+                    # Kill the transcode now, BEFORE the display comes back —
+                    # otherwise cog (WPE) and ffmpeg fight over the 512 MB and
+                    # the renderer crashes. Killing ffmpeg also unblocks the
+                    # sync worker so it can honour the stop. The partial video is
+                    # redone on the next sleep.
+                    subprocess.run(['pkill', '-9', '-f', 'ffmpeg'],
+                                   capture_output=True)
+                    # Wait briefly for the sync to actually stop
                     for _ in range(30):
                         if not syncer.get_status().get('running'):
                             break
                         time.sleep(1)
-                    logger.info("Wake: stopped sync")
+                    logger.info("Wake: stopped sync (killed any transcode)")
                 # Start cage first (Chromium needs time to render)
                 subprocess.run(['sudo', 'systemctl', 'start', 'photo_frame_cage'],
                              capture_output=True, timeout=15)

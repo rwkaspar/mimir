@@ -27,4 +27,4 @@ fi
 # VC4. Fullscreen via the Wayland platform; WEBKIT_DISABLE_COMPOSITING_MODE
 # avoids a black accelerated-layer artifact on VC4.
 WEBKIT_DISABLE_COMPOSITING_MODE=1 COG_PLATFORM_WL_VIEW_FULLSCREEN=1 \
-    cog --platform=wl http://localhost:8080/ &
+    cog --platform=wl --webprocess-failure=restart http://localhost:8080/ &
