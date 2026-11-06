@@ -197,6 +197,13 @@
             opacity: 0.6;
         }
 
+        /* Hold feedback. The fill is animated purely with a CSS transform on
+         * ::after, so WebKit runs it on the compositor thread — it stays
+         * smooth even while the main thread is busy decoding the slideshow
+         * image or a video. (The old version drove a conic-gradient via
+         * requestAnimationFrame, repainting every frame on the main thread,
+         * which stuttered badly under slideshow/video load — the "furchtbare"
+         * reaction.) */
         #hot-corner-progress {
             position: fixed;
             top: 0;
@@ -205,14 +212,40 @@
             height: 200px;
             z-index: 1001;
             clip-path: polygon(100% 0, 0 0, 100% 100%);
-            background: conic-gradient(from 0deg at 67% 33%, rgba(255,255,255,0.7) var(--progress, 0%), transparent 0%);
             pointer-events: none;
             opacity: 0;
-            transition: opacity 0.2s ease;
+            transition: opacity 0.15s ease;
+            overflow: hidden;
+        }
+
+        #hot-corner-progress::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at top right,
+                rgba(255,255,255,0.78) 0%,
+                rgba(255,255,255,0.55) 42%,
+                rgba(255,255,255,0.22) 70%,
+                transparent 100%);
+            transform: scale(0);
+            transform-origin: 100% 0;
+            will-change: transform;
         }
 
         #hot-corner-progress.active {
             opacity: 1;
+        }
+
+        #hot-corner-progress.active::after {
+            animation: hotCornerFill var(--hold-ms, 1500ms) linear forwards;
+        }
+
+        @keyframes hotCornerFill {
+            from { transform: scale(0); }
+            to   { transform: scale(1); }
         }
 
         #clock-overlay {
@@ -1351,10 +1384,10 @@
         const hotCorner = document.getElementById('hot-corner');
         const hotCornerProgress = document.getElementById('hot-corner-progress');
         let holdTimer = null;
-        let holdAnimFrame = null;
         let holdStartTime = null;
         let activePointerId = null;
         const HOLD_DURATION = 1500;
+        hotCornerProgress.style.setProperty('--hold-ms', HOLD_DURATION + 'ms');
 
         function startHold(e) {
             if (e && e.preventDefault) e.preventDefault();
@@ -1362,32 +1395,24 @@
             if (holdStartTime) return;  // already holding
             holdStartTime = Date.now();
             hotCorner.classList.add('holding');
+            // Toggle .active off→on so the CSS fill animation restarts from 0
+            // even on a rapid re-press. The transform animation then runs on
+            // the compositor thread, independent of main-thread decode load.
+            hotCornerProgress.classList.remove('active');
+            void hotCornerProgress.offsetWidth;  // force reflow to reset animation
             hotCornerProgress.classList.add('active');
-            animateProgress();
             holdTimer = setTimeout(() => {
                 cancelHold();
                 openSettings();
             }, HOLD_DURATION);
         }
 
-        function animateProgress() {
-            if (!holdStartTime) return;
-            const elapsed = Date.now() - holdStartTime;
-            const pct = Math.min(100, (elapsed / HOLD_DURATION) * 100);
-            hotCornerProgress.style.setProperty('--progress', pct + '%');
-            if (pct < 100) {
-                holdAnimFrame = requestAnimationFrame(animateProgress);
-            }
-        }
-
         function cancelHold() {
             if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
-            if (holdAnimFrame) { cancelAnimationFrame(holdAnimFrame); holdAnimFrame = null; }
             holdStartTime = null;
             activePointerId = null;
             hotCorner.classList.remove('holding');
             hotCornerProgress.classList.remove('active');
-            hotCornerProgress.style.setProperty('--progress', '0%');
         }
 
         // Register BOTH Pointer Events AND Touch/Mouse handlers — some
