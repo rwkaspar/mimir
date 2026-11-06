@@ -1361,5 +1361,25 @@
         showStep(1);
     }
     </script>
+    <!-- WPE/VC4 kiosk workarounds (Pi Zero 2 W):
+         1. The compositor occasionally leaves an unpainted (black) backing-store
+            tile on the large fullscreen surface. Forcing a repaint (append +
+            remove a full-viewport layer) a few times after load clears it.
+         2. Hide the pointer: WPE shows a cursor because libinput classifies the
+            USB touch panel as a pointer; this is a touch kiosk. -->
+    <style>* { cursor: none !important; }</style>
+    <script>
+      addEventListener('load', function () {
+        function repaint() {
+          var d = document.createElement('div');
+          d.style.cssText = 'position:fixed;inset:0;pointer-events:none;background:transparent';
+          document.body.appendChild(d);
+          requestAnimationFrame(function () {
+            requestAnimationFrame(function () { d.remove(); });
+          });
+        }
+        [200, 700, 1500, 2500].forEach(function (t) { setTimeout(repaint, t); });
+      });
+    </script>
 </body>
 </html>

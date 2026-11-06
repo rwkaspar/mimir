@@ -238,7 +238,7 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
 
     def serve_wizard(self):
         """Serve the first-time setup wizard."""
-        self._serve_html_file('wizard.html')
+        self._serve_html_file('wizard.html', cache=False)
 
     def serve_remote(self):
         """Serve the remote config HTML page."""
