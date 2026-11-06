@@ -9,12 +9,6 @@
   <keyboard>
     <default />
   </keyboard>
-  <!-- Kiosk: define a <mouse> section with NO bindings (and no <default/>) so
-       labwc's built-in mouse/touch actions are disabled — most importantly the
-       root menu (Terminal / Reconfigure / Exit), which a tap must never open on
-       a kiosk. Events are still forwarded to the fullscreen client (cog). -->
-  <mouse>
-  </mouse>
   <libinput>
     <!-- Map the touch panel to the HDMI output so its coordinates follow the
          output transform (rotation) set via wlr-randr. The generic "touch"

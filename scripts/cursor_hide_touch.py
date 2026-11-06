@@ -111,6 +111,45 @@ def main():
     os.close(fd)
     print("[cursor-hide] touch tap injected")
 
+    # The tap can trigger labwc's (now empty) root menu popup; send Escape via a
+    # short-lived virtual keyboard to dismiss it. The menu grabs the keyboard
+    # while open, so Escape closes it and never reaches the web app.
+    send_escape()
+
+
+UI_SET_KEYBIT = 0x40045565  # (already defined above; harmless re-bind)
+KEY_ESC = 1
+
+
+def send_escape():
+    try:
+        kfd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+        fcntl.ioctl(kfd, UI_SET_EVBIT, EV_KEY)
+        fcntl.ioctl(kfd, UI_SET_KEYBIT, KEY_ESC)
+        name = b"mimir-key-esc".ljust(80, b"\x00")
+        dev = (name
+               + struct.pack("HHHH", 0x03, 0x1234, 0x9ABD, 1)
+               + struct.pack("I", 0)
+               + struct.pack("i" * 64, *([0] * 64)) * 4)
+        os.write(kfd, dev)
+        fcntl.ioctl(kfd, UI_DEV_CREATE)
+        time.sleep(2)
+
+        def emit(etype, code, value):
+            os.write(kfd, struct.pack("qqHHi", 0, 0, etype, code, value))
+
+        emit(EV_KEY, KEY_ESC, 1)
+        emit(EV_SYN, SYN_REPORT, 0)
+        time.sleep(0.05)
+        emit(EV_KEY, KEY_ESC, 0)
+        emit(EV_SYN, SYN_REPORT, 0)
+        time.sleep(0.5)
+        fcntl.ioctl(kfd, UI_DEV_DESTROY)
+        os.close(kfd)
+        print("[cursor-hide] escape injected (menu dismissed)")
+    except Exception as e:
+        print("[cursor-hide] escape failed: %s" % e, file=sys.stderr)
+
 
 if __name__ == "__main__":
     try:
