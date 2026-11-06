@@ -21,10 +21,19 @@ if command -v swaybg >/dev/null 2>&1 && [ -f "$SPLASH_IMG" ]; then
       done ) &
 fi
 
-# Kiosk browser: cog (WPE WebKit), NOT Chromium. Chromium forces a GLES 3.0
-# context, which the Pi Zero 2 W's VideoCore IV (GLES 2.0 only) cannot provide,
-# so it never presents a frame (blank/frozen screen). cog/WPE renders fine on
-# VC4. Fullscreen via the Wayland platform; WEBKIT_DISABLE_COMPOSITING_MODE
-# avoids a black accelerated-layer artifact on VC4.
-WEBKIT_DISABLE_COMPOSITING_MODE=1 COG_PLATFORM_WL_VIEW_FULLSCREEN=1 \
+# Kiosk browser: cog (WPE WebKit), NOT Chromium — Chromium forces a GLES 3.0
+# context the Pi Zero 2 W's VideoCore IV (GLES 2.0) can't provide, so it never
+# presents a frame. Fullscreen via the Wayland platform.
+#
+# Hardware H.264 video decode (critical on 512 MB): WPE only uses the Pi's v4l2
+# decoder (/dev/video10) when all of these hold — GL compositing is on with
+# GST_GL_API=gles2, v4l2h264dec is ranked above the software avdec_h264, and the
+# device is reachable. The WebProcess sandbox otherwise hides /dev/video10, so
+# it's disabled here (acceptable: a kiosk shows only its own local content).
+# Without this, software-decoding a 1080p+ slideshow video pegs all cores and
+# hard-freezes the board. The black backing-store tile that GL compositing can
+# leave is cleared by the repaint nudge in index.html/wizard.html — NOT by
+# WEBKIT_DISABLE_COMPOSITING_MODE, which would force slow software video decode.
+GST_GL_API=gles2 GST_PLUGIN_FEATURE_RANK=v4l2h264dec:512 \
+    WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 COG_PLATFORM_WL_VIEW_FULLSCREEN=1 \
     cog --platform=wl --webprocess-failure=restart http://localhost:8080/ &
