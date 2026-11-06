@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<!-- Kiosk: override labwc's built-in root menu (Terminal / Reconfigure / Exit)
+     with an empty one, so even if a menu action somehow fires, nothing useful
+     is exposed. Window-management mouse bindings are also disabled in rc.xml. -->
+<openbox_menu>
+  <menu id="root-menu" label="mimir"/>
+  <menu id="client-menu" label="mimir"/>
+</openbox_menu>
