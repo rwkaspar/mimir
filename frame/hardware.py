@@ -74,6 +74,13 @@ def transcode_profile(full_power: bool = False) -> dict:
         # hard and glitches more. ~1280 max keeps the decoder light; the
         # browser upscales to fill the panel.
         'max_output': 1280 if low else 7680,
+        # x264 speed preset. NOT 'ultrafast' — that preset disables the
+        # in-loop deblocking filter (and scenecut detection), which leaves
+        # visible block artifacts at macroblock edges and in motion ("glitch").
+        # Since weak boards now transcode during sleep with every core free and
+        # at a capped output resolution, 'veryfast' (deblock back on) is well
+        # within budget and decodes much cleaner on the Pi HW decoder.
+        'preset': 'veryfast' if low else 'fast',
         'crf': 28 if low else 23,
         'maxrate_k': 2500 if low else 8000,
         'bufsize_k': 5000 if low else 16000,
