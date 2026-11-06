@@ -256,6 +256,15 @@ def transcode_video(source_path: Path, output_dir: Path,
 
     for orient in orientations:
         tgt_w, tgt_h = h_size if orient == 'horizontal' else v_size
+        # Cap output resolution on weak boards so the kiosk's hardware video
+        # decoder stays light (full-res decode loads the Pi Zero 2 W hard and
+        # glitches more). Scale down proportionally, keeping even dimensions
+        # for H.264; the browser upscales to fill the panel.
+        cap = hw.get('max_output')
+        if cap and max(tgt_w, tgt_h) > cap:
+            scale = cap / float(max(tgt_w, tgt_h))
+            tgt_w = max(2, (int(tgt_w * scale) // 2) * 2)
+            tgt_h = max(2, (int(tgt_h * scale) // 2) * 2)
         out_path = output_dir / orient / out_name
 
         src_landscape = src_w >= src_h

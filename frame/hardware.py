@@ -69,6 +69,11 @@ def transcode_profile(full_power: bool = False) -> dict:
         # 1920x1200 panel a Pi Zero caps at 1920 (full quality for that screen)
         # while a hypothetical 4K panel would still be bounded to Full HD.
         'max_pre_scale': 1920 if low else 7680,
+        # Cap the FINAL output resolution on weak boards: full-res (e.g.
+        # 1920x1200) hardware video decode works but loads the Pi Zero 2 W
+        # hard and glitches more. ~1280 max keeps the decoder light; the
+        # browser upscales to fill the panel.
+        'max_output': 1280 if low else 7680,
         'crf': 28 if low else 23,
         'maxrate_k': 2500 if low else 8000,
         'bufsize_k': 5000 if low else 16000,
