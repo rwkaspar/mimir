@@ -107,6 +107,20 @@
             outline: none;
             border-color: #6af;
         }
+        .pw-show {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #bbb;
+            margin-bottom: 12px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .pw-show input {
+            width: auto;
+            margin: 0;
+        }
         .btn {
             padding: 14px;
             font-size: 16px;
@@ -187,6 +201,7 @@
                 rescan: 'Rescan',
                 connect_to: 'Connect to',
                 wifi_password: 'WiFi password',
+                show_password: 'Show password',
                 connect: 'Connect',
                 cancel: 'Cancel',
                 scanning: 'Scanning for networks...',
@@ -205,6 +220,7 @@
                 rescan: 'Erneut suchen',
                 connect_to: 'Verbinden mit',
                 wifi_password: 'WLAN-Passwort',
+                show_password: 'Passwort anzeigen',
                 connect: 'Verbinden',
                 cancel: 'Abbrechen',
                 scanning: 'Suche Netzwerke...',
@@ -265,6 +281,7 @@
                         '<div class="pw-ssid">' + escapeHtml(n.ssid) + '</div>';
                     if (n.secured) {
                         html += '<input type="password" id="wifi-password" placeholder="' + t('wifi_password') + '" autocomplete="off">';
+                        html += '<label class="pw-show"><input type="checkbox" onchange="togglePw(this)"> ' + t('show_password') + '</label>';
                     }
                     html += '<button class="btn btn-connect" onclick="doConnect()">' + t('connect') + '</button>' +
                         '<button class="btn btn-cancel" onclick="cancelSelect()">' + t('cancel') + '</button>' +
@@ -285,6 +302,11 @@
             // Focus password field if present
             var pwField = document.getElementById('wifi-password');
             if (pwField) pwField.focus();
+        }
+
+        function togglePw(cb) {
+            var pwField = document.getElementById('wifi-password');
+            if (pwField) pwField.type = cb.checked ? 'text' : 'password';
         }
 
         function selectNetwork(ssid) {

@@ -29,6 +29,13 @@ chmod +x "${BOOT_DIR}/photo_frame_bootstrap.sh"
 # i2c-dev is needed for ddcutil (DDC/CI backlight control).
 echo "i2c-dev" > /etc/modules-load.d/i2c-dev.conf
 
+# WiFi regulatory domain: without a country the domain is world/00, which makes
+# the onboard brcmfmac AP (Pi Zero 2 W) restrict channels and fail client
+# association. Pin it so the setup hotspot works out of the box. The runtime
+# WIFI_COUNTRY env / `iw reg set` still apply; this is the persistent default.
+echo "options cfg80211 ieee80211_regdom=${PHOTOFRAME_WIFI_COUNTRY:-DE}" \
+    > /etc/modprobe.d/cfg80211.conf
+
 # Default hostname so the frame is reachable at mimir.local out of the box.
 # (Pi Imager's own hostname customization still overrides this if set.)
 echo "mimir" > /etc/hostname

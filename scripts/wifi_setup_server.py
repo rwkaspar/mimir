@@ -49,16 +49,48 @@ def get_gateway_ip():
     return "10.42.0.1"  # fallback
 
 
+def _wifi_country():
+    """ISO country for the WiFi regulatory domain. Overridable via the
+    WIFI_COUNTRY env var; defaults to DE."""
+    c = (os.environ.get("WIFI_COUNTRY") or "").strip().upper()
+    return c if len(c) == 2 and c.isalpha() else "DE"
+
+
 def start_hotspot():
     # Clear any stale hotspot profile first. Otherwise `nmcli device wifi
     # hotspot` can reuse an existing "Hotspot" connection (e.g. left over with
     # the previous SSID) instead of broadcasting the SSID we show on screen and
     # in the QR — then the phone looks for a network that isn't on the air and
     # the join fails, manually and via QR.
+    # Set the WiFi regulatory domain: without a country the domain is world/00
+    # and the brcmfmac AP (Pi Zero 2 W) restricts channels, so force it.
+    run_cmd(["rfkill", "unblock", "wifi"], timeout=10)
+    run_cmd(["iw", "reg", "set", _wifi_country()], timeout=10)
+    time.sleep(1)
     for stale in ("hotspot", "Hotspot", "PhotoFrame-Setup"):
         run_cmd(["nmcli", "connection", "delete", stale], timeout=10)
-    run_cmd(["nmcli", "device", "wifi", "hotspot", "con-name", "hotspot",
-             "ssid", HOTSPOT_SSID, "password", HOTSPOT_PASSWORD])
+    # Build the AP by hand so we can DISABLE PMF (802-11w). Modern Androids
+    # negotiate PMF, but the brcmfmac AP firmware mishandles it and the WPA2
+    # 4-way handshake silently fails (phone shows "saved", never connects).
+    # pmf=1 => disabled. Also force 2.4GHz + a fixed channel and turn off
+    # power-save (the radio naps and misses association frames otherwise).
+    run_cmd(["nmcli", "connection", "add", "type", "wifi", "ifname", "wlan0",
+             "con-name", "hotspot", "autoconnect", "no", "ssid", HOTSPOT_SSID],
+            timeout=10)
+    run_cmd(["nmcli", "connection", "modify", "hotspot",
+             "802-11-wireless.mode", "ap",
+             "802-11-wireless.band", "bg",
+             "802-11-wireless.channel", "6",
+             "802-11-wireless.powersave", "2",
+             "ipv4.method", "shared",
+             "802-11-wireless-security.key-mgmt", "wpa-psk",
+             "802-11-wireless-security.psk", HOTSPOT_PASSWORD,
+             "802-11-wireless-security.proto", "rsn",
+             "802-11-wireless-security.pairwise", "ccmp",
+             "802-11-wireless-security.group", "ccmp",
+             "802-11-wireless-security.pmf", "1"], timeout=10)
+    run_cmd(["nmcli", "connection", "up", "hotspot"], timeout=20)
+    run_cmd(["iw", "dev", "wlan0", "set", "power_save", "off"], timeout=10)
     # Ground-truth log: what SSID is actually being broadcast now?
     ssid, _ = run_cmd(["nmcli", "-g", "802-11-wireless.ssid",
                        "connection", "show", "hotspot"])

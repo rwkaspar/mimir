@@ -12,6 +12,7 @@ ddcutil
 i2c-tools
 network-manager
 dnsmasq-base
+iptables
 qrencode
 libjpeg-dev
 zlib1g-dev

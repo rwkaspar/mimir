@@ -1,6 +1,7 @@
 """WiFi management: connectivity check, hotspot fallback, captive portal support."""
 
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -52,20 +53,52 @@ class WiFiManager:
                     ['nmcli', 'connection', 'delete', HOTSPOT_CON_NAME],
                     capture_output=True, timeout=10)
 
+                # Regulatory domain: unset => world/00 => brcmfmac AP restricts
+                # channels. Force it (overridable via WIFI_COUNTRY).
+                country = (os.environ.get('WIFI_COUNTRY') or '').strip().upper()
+                if not (len(country) == 2 and country.isalpha()):
+                    country = 'DE'
+                subprocess.run(['rfkill', 'unblock', 'wifi'],
+                               capture_output=True, timeout=10)
+                subprocess.run(['iw', 'reg', 'set', country],
+                               capture_output=True, timeout=10)
+
                 # Disconnect any existing WiFi first
                 subprocess.run(
                     ['nmcli', 'device', 'disconnect', 'wlan0'],
                     capture_output=True, timeout=10)
                 time.sleep(1)
 
-                # Start hotspot via NetworkManager
+                # Build the AP by hand so we can DISABLE PMF (802-11w). Modern
+                # Androids negotiate PMF, but the brcmfmac AP firmware mishandles
+                # it and the WPA2 4-way handshake silently fails (phone shows
+                # "saved", never connects). pmf=1 => disabled. Also force 2.4GHz
+                # + a fixed channel and turn power-save off (the radio otherwise
+                # naps and misses client association frames).
+                subprocess.run(
+                    ['nmcli', 'connection', 'add', 'type', 'wifi',
+                     'ifname', 'wlan0', 'con-name', HOTSPOT_CON_NAME,
+                     'autoconnect', 'no', 'ssid', HOTSPOT_SSID],
+                    capture_output=True, timeout=10)
+                subprocess.run(
+                    ['nmcli', 'connection', 'modify', HOTSPOT_CON_NAME,
+                     '802-11-wireless.mode', 'ap',
+                     '802-11-wireless.band', 'bg',
+                     '802-11-wireless.channel', '6',
+                     '802-11-wireless.powersave', '2',
+                     'ipv4.method', 'shared',
+                     '802-11-wireless-security.key-mgmt', 'wpa-psk',
+                     '802-11-wireless-security.psk', HOTSPOT_PASSWORD,
+                     '802-11-wireless-security.proto', 'rsn',
+                     '802-11-wireless-security.pairwise', 'ccmp',
+                     '802-11-wireless-security.group', 'ccmp',
+                     '802-11-wireless-security.pmf', '1',
+                     'connection.autoconnect', 'yes',
+                     'connection.autoconnect-priority', '100'],
+                    capture_output=True, timeout=10)
                 result = subprocess.run(
-                    ['nmcli', 'device', 'wifi', 'hotspot',
-                     'ifname', 'wlan0',
-                     'con-name', HOTSPOT_CON_NAME,
-                     'ssid', HOTSPOT_SSID,
-                     'password', HOTSPOT_PASSWORD],
-                    capture_output=True, text=True, timeout=15)
+                    ['nmcli', 'connection', 'up', HOTSPOT_CON_NAME],
+                    capture_output=True, text=True, timeout=20)
                 if result.returncode != 0:
                     logger.error(f"Hotspot start failed: {result.stderr.strip()}")
                     # Don't leave wlan0 stranded (disconnected + no autoconnect).
@@ -73,14 +106,8 @@ class WiFiManager:
                     subprocess.run(['nmcli', 'device', 'connect', 'wlan0'],
                                    capture_output=True, timeout=15)
                     return False
-
-                # Keep the hotspot active instead of letting NetworkManager
-                # auto-reconnect wlan0 to a known network a few seconds later.
-                subprocess.run(
-                    ['nmcli', 'connection', 'modify', HOTSPOT_CON_NAME,
-                     'connection.autoconnect', 'yes',
-                     'connection.autoconnect-priority', '100'],
-                    capture_output=True, timeout=10)
+                subprocess.run(['iw', 'dev', 'wlan0', 'set', 'power_save', 'off'],
+                               capture_output=True, timeout=10)
 
                 # Redirect port 80 -> 8080 for captive portal detection
                 subprocess.run(
