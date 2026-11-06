@@ -1258,6 +1258,7 @@
         let currentImage = null;
         let previousImage = null;
         let intervalId = null;
+        let stallWatchdog = null;
         let photoHistory = [];  // stack of previously shown indices
         let lastPhotoCount = 0; // track photo list changes
 
@@ -2203,23 +2204,41 @@
         // for photos we use config.interval.
         function scheduleNextAdvance() {
             if (intervalId) { clearTimeout(intervalId); intervalId = null; }
+            if (stallWatchdog) { clearInterval(stallWatchdog); stallWatchdog = null; }
             if (!currentImage) return;
             // Videos: the foreground <video> is at currentImage._fg (wrapper div)
             const fgVideo = currentImage._fg;
             if (fgVideo) {
-                const onEnded = () => {
-                    fgVideo.removeEventListener('ended', onEnded);
+                let advanced = false;
+                const go = () => {
+                    if (advanced) return;
+                    advanced = true;
+                    fgVideo.removeEventListener('ended', go);
+                    fgVideo.removeEventListener('error', go);
+                    if (stallWatchdog) { clearInterval(stallWatchdog); stallWatchdog = null; }
+                    if (intervalId) { clearTimeout(intervalId); intervalId = null; }
                     showNextPhoto();
                 };
-                fgVideo.addEventListener('ended', onEnded, { once: true });
-                // Safety fallback: if 'ended' never fires (e.g. corrupt video),
-                // advance after duration + 5s, or 3 minutes max.
+                fgVideo.addEventListener('ended', go, { once: true });
+                fgVideo.addEventListener('error', go, { once: true });
+                // Stall watchdog: on the Pi's hardware decoder 'ended' is
+                // unreliable and the decoder can stall mid-clip, leaving the
+                // slideshow stuck on a frozen frame. Watch the playback position:
+                // if it stops progressing for ~8s (clip ended, or stalled),
+                // advance instead of waiting out the long fallback.
+                let lastTime = -1, stuckTicks = 0, elapsed = 0;
+                stallWatchdog = setInterval(() => {
+                    elapsed += 2;
+                    const t = fgVideo.currentTime || 0;
+                    if (Math.abs(t - lastTime) < 0.05) stuckTicks++; else stuckTicks = 0;
+                    lastTime = t;
+                    if ((stuckTicks >= 4 && t > 0.4) || elapsed > 125) go();
+                }, 2000);
+                // Belt-and-suspenders hard cap (videos are capped at ~120s by
+                // the transcoder); unknown duration -> the cap, not 3 minutes.
                 const dur = (fgVideo.duration && isFinite(fgVideo.duration))
-                    ? fgVideo.duration : 180;
-                intervalId = setTimeout(() => {
-                    fgVideo.removeEventListener('ended', onEnded);
-                    showNextPhoto();
-                }, (dur + 5) * 1000);
+                    ? fgVideo.duration : 125;
+                intervalId = setTimeout(go, (dur + 8) * 1000);
             } else {
                 intervalId = setTimeout(showNextPhoto, config.interval);
             }
