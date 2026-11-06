@@ -1355,8 +1355,13 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             duration = min(int(data.get('duration', 10)), 15)
             if method not in ('hdmi', 'ddcci', 'dpms', 'brightness', 'black_only'):
                 raise ValueError(f'Invalid method: {method}')
+            # The test now replicates real sleep (it stops the kiosk), so run it
+            # in a background thread and answer immediately — the kiosk page will
+            # vanish and reload when the frame wakes, resuming at the sleep step.
             if self.app and self.app.energy_save:
-                self.app.energy_save.test_sleep_method(method, duration)
+                threading.Thread(
+                    target=lambda: self.app.energy_save.test_sleep_method(method, duration),
+                    daemon=True).start()
             self._json_response({'ok': True, 'method': method})
         except Exception as e:
             logger.error(f"Sleep test error: {e}")

@@ -326,6 +326,9 @@ cat > /etc/systemd/system/photo_frame_cage.service << EOF
 Description=Digital Photo Frame Viewer (labwc + cog/WPE)
 After=network.target photo_frame_server.service
 Wants=photo_frame_server.service
+# Re-hide the pointer cursor on every cage start (boot AND wake-from-sleep):
+# cog relaunches and the cursor reappears, so pull the oneshot in each time.
+Wants=photo_frame_cursor_hide.service
 Conflicts=display-manager.service
 
 [Service]

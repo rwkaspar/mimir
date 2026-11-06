@@ -498,7 +498,8 @@
             sleep_subtitle: 'Test how the frame turns off the screen backlight',
             sleep_subtitle_pick: 'How should the frame turn off the screen?',
             sleep_test_btn: 'Test selected method',
-            sleep_info: "We'll test different methods to turn off your screen. Each test lasts 10 seconds.",
+            sleep_testing_real: 'Testing… the screen turns off for a few seconds (like real sleep), then setup returns here.',
+            sleep_info: "We'll test how your screen turns off. The test briefly sleeps the frame — screen off, then back — exactly like the real sleep schedule.",
             test_sleep: 'Start Tests',
             sleep_testing: 'Testing',
             sleep_did_work: 'Did the screen turn off and stay black?',
@@ -598,7 +599,8 @@
             sleep_subtitle: 'Testen, wie der Rahmen die Hintergrundbeleuchtung ausschaltet',
             sleep_subtitle_pick: 'Wie soll der Rahmen den Bildschirm ausschalten?',
             sleep_test_btn: 'Ausgew\u00e4hlte Methode testen',
-            sleep_info: 'Wir testen verschiedene Methoden, um den Bildschirm auszuschalten. Jeder Test dauert 10 Sekunden.',
+            sleep_testing_real: 'Test l\u00e4uft\u2026 der Bildschirm schaltet sich f\u00fcr ein paar Sekunden aus (wie im echten Schlaf), danach geht die Einrichtung hier weiter.',
+            sleep_info: 'Wir testen, wie dein Bildschirm ausschaltet. Der Test versetzt den Rahmen kurz in den Schlaf \u2013 Bildschirm aus, dann wieder an \u2013 genau wie der echte Schlaf-Zeitplan.',
             test_sleep: 'Schlafmodus testen',
             sleep_testing: 'Teste',
             sleep_did_work: 'Hat sich der Bildschirm ausgeschaltet und ist schwarz geblieben?',
@@ -1069,24 +1071,17 @@
     }
 
     function testSleepMethod() {
+        // The test replicates real sleep: it stops the kiosk, so this page
+        // vanishes and reloads when the frame wakes. Remember our step so the
+        // wizard resumes here, then fire the test (we won't see its response).
+        localStorage.setItem('wizard-step', '4');
         var area = document.getElementById('sleep-test-area');
-        area.innerHTML = '<div class="status-msg info"><span class="spinner"></span> ' + t('sleep_testing') + ' ' + t(sleepMethodNames[selectedSleepMethod]) + '...</div>';
+        area.innerHTML = '<div class="status-msg info"><span class="spinner"></span> ' + t('sleep_testing_real') + '</div>';
         fetch('/api/sleep/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ method: selectedSleepMethod, duration: 10 })
-        })
-        .then(function(r) { return r.json(); })
-        .then(function() {
-            area.innerHTML =
-                '<div class="status-msg success">' + t('sleep_test_done') + '</div>' +
-                '<button class="btn btn-secondary" style="width:100%;opacity:0.7;margin-top:8px;" onclick="testSleepMethod()">' + t('sleep_test_btn') + '</button>';
-        })
-        .catch(function() {
-            area.innerHTML =
-                '<div class="status-msg error">' + t('test_failed') + '</div>' +
-                '<button class="btn btn-secondary" style="width:100%;opacity:0.7;margin-top:8px;" onclick="testSleepMethod()">' + t('sleep_test_btn') + '</button>';
-        });
+            body: JSON.stringify({ method: selectedSleepMethod, duration: 8 })
+        }).catch(function () {});
     }
 
     function saveSleepMethod(method) {

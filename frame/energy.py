@@ -355,18 +355,45 @@ class EnergySaveManager:
         except Exception as e:
             logger.error(f"Sleep update error: {e}")
 
-    def test_sleep_method(self, method, duration=10):
-        """Test a sleep method: turn off for duration seconds, then turn on.
+    def test_sleep_method(self, method, duration=8):
+        """Test a sleep method EXACTLY like real sleep does it.
 
-        Used by the wizard to let users find the best sleep method.
+        Real sleep stops the display service first, so the panel sees a static
+        signal — which DDC/CI power-off (ddcci) needs to take effect; with the
+        compositor still rendering, many monitors ignore it. A test that only
+        toggled the backlight command (compositor running) was therefore
+        misleading (ddcci looked like "no reaction"). So replicate the real
+        flow: stop cage, black the framebuffer, run the method, wait, then
+        restore. Does NOT run update/sync. Call from a background thread — this
+        kills the kiosk, so the wizard page reloads afterwards.
         """
         saved = self.method
         self.method = method
         try:
+            # Brief head start so the wizard's localStorage write (resume step)
+            # is flushed to disk before cog is killed by stopping the kiosk.
+            time.sleep(2)
+            subprocess.run(['sudo', 'systemctl', 'stop', 'photo_frame_cage'],
+                           capture_output=True, timeout=15)
+            time.sleep(1)
+            subprocess.run(['sudo', 'dd', 'if=/dev/zero', 'of=/dev/fb0',
+                            'bs=1M', 'count=10'], capture_output=True, timeout=5)
+            subprocess.run(
+                ['sudo', 'sh', '-c',
+                 'setterm --cursor off --blank force --powerdown 0 > /dev/tty1'],
+                capture_output=True, timeout=5)
             self._backlight_off()
-            time.sleep(duration)
-            self._backlight_on()
+            time.sleep(max(1, int(duration)))
+        except Exception as e:
+            logger.error(f"Sleep test error: {e}")
         finally:
+            try:
+                self._backlight_on()
+            except Exception:
+                pass
+            # Always bring the kiosk back, even if the method failed.
+            subprocess.run(['sudo', 'systemctl', 'start', 'photo_frame_cage'],
+                           capture_output=True, timeout=15)
             self.method = saved
 
     def _touch_wake_listener(self):
