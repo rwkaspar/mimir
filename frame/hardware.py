@@ -69,11 +69,13 @@ def transcode_profile(full_power: bool = False) -> dict:
         # 1920x1200 panel a Pi Zero caps at 1920 (full quality for that screen)
         # while a hypothetical 4K panel would still be bounded to Full HD.
         'max_pre_scale': 1920 if low else 7680,
-        # Cap the FINAL output resolution on weak boards: full-res (e.g.
-        # 1920x1200) hardware video decode works but loads the Pi Zero 2 W
-        # hard and glitches more. ~1280 max keeps the decoder light; the
-        # browser upscales to fill the panel.
-        'max_output': 1280 if low else 7680,
+        # FINAL output resolution ceiling. Native kiosk plays video directly
+        # via v4l2h264dec!kmssink (no browser), which decodes 1920x1200 at
+        # realtime with 0 QoS drops and ample CMA/gpu_mem headroom, so we
+        # target the panel's full resolution (sharp, fills the screen). The
+        # old 1280 cap existed only because the WPE browser decode path was
+        # CMA-starved and upscaled — obsolete now. Keep ÷2 for yuv420p.
+        'max_output': 1920 if low else 7680,
         # x264 speed preset. NOT 'ultrafast' — that preset disables the
         # in-loop deblocking filter (and scenecut detection), which leaves
         # visible block artifacts at macroblock edges and in motion ("glitch").
@@ -81,10 +83,13 @@ def transcode_profile(full_power: bool = False) -> dict:
         # at a capped output resolution, 'veryfast' (deblock back on) is well
         # within budget and decodes much cleaner on the Pi HW decoder.
         'preset': 'veryfast' if low else 'fast',
-        'crf': 28 if low else 23,
-        'maxrate_k': 2500 if low else 8000,
-        'bufsize_k': 5000 if low else 16000,
+        'crf': 24 if low else 23,
+        'maxrate_k': 6000 if low else 8000,
+        'bufsize_k': 12000 if low else 16000,
         'fps_cap': 30 if low else 60,
-        'level': '4.0' if low else '4.2',
+        # H.264 level must admit the output frame size: 1920x1200 (and the
+        # 1200x1920 portrait variant) is 9000 macroblocks/frame, which exceeds
+        # level 4.2 (MaxFS 8704) — needs 5.0. The Pi HW decoder handles 5.0.
+        'level': '5.0' if low else '4.2',
     }
     return profile

@@ -82,15 +82,19 @@ def _build_filter(src_w: int, src_h: int, tgt_w: int, tgt_h: int,
     tgt_landscape = tgt_w >= tgt_h
     box_r = max(5, blur_radius // 2)
 
+    # setsar=1 on every branch: a non-1:1 output SAR makes the Pi kmssink
+    # scanout show a band of green garbage along the bottom edge (an inherited
+    # odd SAR from the source, or introduced by scaling). Forcing square pixels
+    # keeps the HW-decoded frame clean on the native player.
     if src_landscape == tgt_landscape:
         # Same orientation: scale to cover, center-crop
         return (f"scale={tgt_w}:{tgt_h}:force_original_aspect_ratio=increase,"
-                f"crop={tgt_w}:{tgt_h}")
+                f"crop={tgt_w}:{tgt_h},setsar=1")
 
     if not blur_fill:
         # Letterbox fallback: scale to fit, pad with black. Lowest memory.
         return (f"scale={tgt_w}:{tgt_h}:force_original_aspect_ratio=decrease,"
-                f"pad={tgt_w}:{tgt_h}:(ow-iw)/2:(oh-ih)/2:color=black")
+                f"pad={tgt_w}:{tgt_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1")
 
     # Cross orientation blur-fill: scale source down FIRST so split copies
     # work on a small frame, then build the blur background + overlay.
@@ -98,7 +102,7 @@ def _build_filter(src_w: int, src_h: int, tgt_w: int, tgt_h: int,
         f"[0:v]scale={tgt_w}:{tgt_h}:force_original_aspect_ratio=decrease,split=2[bg][fg];"
         f"[bg]scale={tgt_w}:{tgt_h}:force_original_aspect_ratio=increase,"
         f"crop={tgt_w}:{tgt_h},boxblur={box_r}:1,eq=brightness=-0.2[bg2];"
-        f"[bg2][fg]overlay=(W-w)/2:(H-h)/2"
+        f"[bg2][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
     )
 
 
@@ -256,10 +260,10 @@ def transcode_video(source_path: Path, output_dir: Path,
 
     for orient in orientations:
         tgt_w, tgt_h = h_size if orient == 'horizontal' else v_size
-        # Cap output resolution on weak boards so the kiosk's hardware video
-        # decoder stays light (full-res decode loads the Pi Zero 2 W hard and
-        # glitches more). Scale down proportionally, keeping even dimensions
-        # for H.264; the browser upscales to fill the panel.
+        # Cap output resolution to the board's ceiling (panel-native 1920 on a
+        # Pi Zero now that the native player decodes full-res cleanly; smaller
+        # only if a weaker board ever needs it). Scale down proportionally,
+        # keeping even dimensions for H.264.
         cap = hw.get('max_output')
         if cap and max(tgt_w, tgt_h) > cap:
             scale = cap / float(max(tgt_w, tgt_h))
