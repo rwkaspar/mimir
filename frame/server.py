@@ -76,6 +76,19 @@ def main():
     # _set_sleep triggers before syncer is initialized)
     app.energy_save.start()
 
+    # Native video interludes: the cog/WPE kiosk can't decode video on this
+    # board, so a scheduler briefly drops the kiosk and plays videos straight to
+    # the panel via the HW decoder, then restarts the kiosk. Videos live in
+    # <photos_dir>/<orientation>/*.mp4 but are excluded from the kiosk's /list.
+    video_cfg = config.get('videos', {}) or {}
+    app.native_video = None
+    if video_cfg.get('enabled', True) and video_cfg.get('native_enabled', True):
+        from frame.native_video import NativeVideoPlayer, VideoScheduler
+        app.native_video = NativeVideoPlayer(app, photos_dir)
+        interval_s = int(video_cfg.get('native_interval_minutes', 10)) * 60
+        app.video_scheduler = VideoScheduler(app, app.native_video, interval_s)
+        app.video_scheduler.start()
+
     # Home Assistant integration over MQTT (optional).
     app.mqtt_bridge = None
     if (config.get('mqtt', {}) or {}).get('enabled'):

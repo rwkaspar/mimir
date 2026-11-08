@@ -300,7 +300,11 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             def _list_media_urls(subdir, orient):
                 if not subdir.exists():
                     return []
-                files = list(subdir.glob('*.jpg')) + list(subdir.glob('*.mp4'))
+                # Photos only: videos (*.mp4) are played natively by the
+                # NativeVideoPlayer (the WPE/cog browser can't decode them on
+                # this board), so they are deliberately kept out of the kiosk's
+                # slideshow list.
+                files = list(subdir.glob('*.jpg'))
                 return [f'/photos/{orient}/{p.name}' for p in files]
 
             photos = _list_media_urls(photos_subdir, orientation)
