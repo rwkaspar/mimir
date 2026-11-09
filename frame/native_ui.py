@@ -109,9 +109,22 @@ class FbCanvas:
         return packed.astype('<u2').tobytes()
 
     def flush(self, tmp='/tmp/native_ui.raw'):
-        """Pack to RGB565 and write to the framebuffer (root via sudo dd)."""
+        """Pack to RGB565 and write the framebuffer. The frame user is in the
+        'video' group, so write /dev/fb0 directly (~5ms) instead of spawning a
+        `sudo dd` per render (the old path, ~100ms+); fall back to sudo dd if the
+        direct open fails."""
+        data = self._to_rgb565()
+        try:
+            fd = os.open('/dev/fb0', os.O_WRONLY)
+            try:
+                os.pwrite(fd, data, 0)
+            finally:
+                os.close(fd)
+            return
+        except Exception as e:
+            logger.debug('direct fb write failed (%s); sudo dd', e)
         with open(tmp, 'wb') as f:
-            f.write(self._to_rgb565())
+            f.write(data)
         subprocess.run(['sudo', 'dd', 'if=%s' % tmp, 'of=/dev/fb0', 'bs=4M'],
                        capture_output=True, timeout=10)
 
@@ -214,8 +227,8 @@ class Toggle(Widget):
         d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font, fill=FG,
                anchor='lm')
         on = bool(self.get())
-        pw = int((y1 - y0) * 1.7)
-        ph = int((y1 - y0) * 0.52)
+        ph = min(int((y1 - y0) * 0.44), 44)     # compact switch, capped height
+        pw = int(ph * 1.9)
         px1 = x1 - pad
         px0 = px1 - pw
         pcy = (y0 + y1) // 2

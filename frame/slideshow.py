@@ -63,6 +63,7 @@ class NativeSlideshow:
         # active) so the overlay can be drawn directly. _hold_bg is the cached
         # dimmed backdrop PIL image for the current hold.
         self._fb_lock = threading.Lock()
+        self._fbfd = None          # cached /dev/fb0 fd for direct writes
         self._cur_fb_raw = None
         self._showing_photo = False
         self._hold_bg = None
@@ -128,12 +129,42 @@ class NativeSlideshow:
     def _fb_pixfmt(self):
         return 'rgb565le' if self.fb_bpp == 16 else 'bgra'
 
-    def _write_fb(self, raw_path):
-        # /dev/fb0 is root:video 660; use sudo dd (matches energy.py).
+    def _fb_fd(self):
+        """A cached write fd for /dev/fb0. The frame user is in the 'video'
+        group, so it can write the framebuffer directly — a ~5ms os.write vs a
+        ~100ms+ `sudo dd` process spawn per frame (the old path). -1 if it can't
+        be opened (then callers fall back to sudo dd)."""
+        if self._fbfd is None:
+            try:
+                self._fbfd = os.open('/dev/fb0', os.O_WRONLY)
+            except Exception as e:
+                logger.warning('open /dev/fb0 failed (%s); using sudo dd', e)
+                self._fbfd = -1
+        return self._fbfd
+
+    def _fb_write_bytes(self, data):
         with self._fb_lock:
-            subprocess.run(['sudo', 'dd', f'if={raw_path}', 'of=/dev/fb0', 'bs=4M'],
-                           capture_output=True, timeout=10)
-            self._cur_fb_raw = raw_path
+            fd = self._fb_fd()
+            if fd >= 0:
+                try:
+                    os.pwrite(fd, data, 0)
+                    return
+                except Exception as e:
+                    logger.debug('direct fb write failed (%s); sudo dd', e)
+            with open(self._RING_RAW, 'wb') as f:   # fallback
+                f.write(data)
+            self._dd(self._RING_RAW)
+
+    def _fb_write_file(self, path):
+        try:
+            with open(path, 'rb') as f:
+                self._fb_write_bytes(f.read())
+        except Exception as e:
+            logger.debug('fb write %s failed: %s', path, e)
+
+    def _write_fb(self, raw_path):
+        self._fb_write_file(raw_path)
+        self._cur_fb_raw = raw_path
 
     # --- playlist ---
 
@@ -524,10 +555,7 @@ class NativeSlideshow:
         a = np.asarray(im, dtype=np.uint16)
         r, g, b = a[:, :, 0], a[:, :, 1], a[:, :, 2]
         packed = (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)).astype('<u2')
-        with open(self._RING_RAW, 'wb') as fh:
-            fh.write(packed.tobytes())
-        with self._fb_lock:
-            self._dd(self._RING_RAW)
+        self._fb_write_bytes(packed.tobytes())
 
     def _on_hot_progress(self, frac):
         # Ignore while the menu is already open.
@@ -554,11 +582,7 @@ class NativeSlideshow:
         had_bg = self._hold_bg is not None
         self._hold_bg = None
         if had_bg and self._showing_photo and self._cur_fb_raw:
-            try:
-                with self._fb_lock:     # restore the clean photo under the overlay
-                    self._dd(self._cur_fb_raw)
-            except Exception:
-                pass
+            self._fb_write_file(self._cur_fb_raw)   # restore the clean photo
 
     def _hold_overlay(self):
         """A hold happened over video: the player has torn down, so fb0 is ours.
