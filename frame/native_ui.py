@@ -815,6 +815,9 @@ class NativeUI:
     screens use the API directly.
     """
 
+    _GUARD_R = 130        # px: bounce dead-zone radius around a navigating tap
+    _GUARD_S = 0.8        # s: how long that spot stays dead on the new screen
+
     def __init__(self, hooks=None, orientation='horizontal',
                  api_base='http://localhost:8080'):
         self.canvas = FbCanvas()
@@ -822,7 +825,12 @@ class NativeUI:
         self.orientation = orientation
         self.api_base = api_base
         self.screen = None
-        self._tap_guard = 0.0     # ignore taps until this time (post-nav debounce)
+        # Bounce guard: after a tap NAVIGATES to another screen, taps near that
+        # same spot are ignored briefly, so a second (unintended) tap from the
+        # laggy panel can't land on whatever the new screen drew there. In-place
+        # rerenders (toggle/stepper/slider) are NOT guarded — you may re-tap them.
+        self._guard_pt = None
+        self._guard_until = 0.0
 
     def panel_rect(self):
         """The centred settings card, sized by orientation. Roomy enough for
@@ -887,18 +895,20 @@ class NativeUI:
         if self.screen is None:
             return False
         now = time.time()
-        if now < self._tap_guard:
-            return True            # swallow a bounce tap right after a navigation
+        if (self._guard_pt is not None and now < self._guard_until
+                and abs(x - self._guard_pt[0]) < self._GUARD_R
+                and abs(y - self._guard_pt[1]) < self._GUARD_R):
+            return True            # bounce tap on the spot we just navigated from
         nxt = self.screen.on_tap(x, y)
         if nxt == 'close':
             self.screen = None
             return False
         if nxt == 'rerender':
-            self._tap_guard = now + 0.35
-            self.screen.render(self.canvas)
+            self.screen.render(self.canvas)   # same screen: don't guard re-taps
             return True
         if isinstance(nxt, Screen):
-            self._tap_guard = now + 0.35
+            self._guard_pt = (x, y)           # dead-zone this spot on the new screen
+            self._guard_until = now + self._GUARD_S
             self.screen = nxt
             self.screen.render(self.canvas)
         return True
