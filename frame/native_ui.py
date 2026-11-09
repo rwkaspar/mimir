@@ -815,8 +815,7 @@ class NativeUI:
     screens use the API directly.
     """
 
-    _GUARD_R = 130        # px: bounce dead-zone radius around a navigating tap
-    _GUARD_S = 0.8        # s: how long that spot stays dead on the new screen
+    _GUARD_S = 1.0        # s: ignore all taps this long after a navigation
 
     def __init__(self, hooks=None, orientation='horizontal',
                  api_base='http://localhost:8080'):
@@ -825,11 +824,11 @@ class NativeUI:
         self.orientation = orientation
         self.api_base = api_base
         self.screen = None
-        # Bounce guard: after a tap NAVIGATES to another screen, taps near that
-        # same spot are ignored briefly, so a second (unintended) tap from the
-        # laggy panel can't land on whatever the new screen drew there. In-place
-        # rerenders (toggle/stepper/slider) are NOT guarded — you may re-tap them.
-        self._guard_pt = None
+        # Bounce guard: after a tap NAVIGATES to another screen, ALL taps are
+        # ignored for a moment, so a second (unintended) tap from the laggy panel
+        # can't land on whatever the new screen drew under the finger — no matter
+        # where that button sits. In-place rerenders (toggle/stepper/slider) are
+        # NOT guarded, so you can still re-tap them quickly.
         self._guard_until = 0.0
 
     def panel_rect(self):
@@ -895,10 +894,8 @@ class NativeUI:
         if self.screen is None:
             return False
         now = time.time()
-        if (self._guard_pt is not None and now < self._guard_until
-                and abs(x - self._guard_pt[0]) < self._GUARD_R
-                and abs(y - self._guard_pt[1]) < self._GUARD_R):
-            return True            # bounce tap on the spot we just navigated from
+        if now < self._guard_until:
+            return True            # ignore bounce taps right after a navigation
         nxt = self.screen.on_tap(x, y)
         if nxt == 'close':
             self.screen = None
@@ -907,10 +904,11 @@ class NativeUI:
             self.screen.render(self.canvas)   # same screen: don't guard re-taps
             return True
         if isinstance(nxt, Screen):
-            self._guard_pt = (x, y)           # dead-zone this spot on the new screen
-            self._guard_until = now + self._GUARD_S
             self.screen = nxt
             self.screen.render(self.canvas)
+            # Start the freeze once the new screen is actually on-panel (render can
+            # take a while on the Zero), so the full window covers the bounce.
+            self._guard_until = time.time() + self._GUARD_S
         return True
 
 
