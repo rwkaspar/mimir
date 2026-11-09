@@ -48,6 +48,14 @@ class NativeSlideshow:
         # media set changes), stable in between — see _daily_order().
         self._order = []
         self._order_key = None
+        # Settings menu (hot corner): a TouchReader watches for a hold in the
+        # top-right corner; _menu_req then pauses playback so the menu can own
+        # the framebuffer. See _start_touch() / _open_menu().
+        self._menu_req = threading.Event()
+        self._ui = None
+        self._touch = None
+        self._native_ui = None
+        self._menu_activity = 0.0
         # Target render size = panel, capped on weak boards.
         cap = LOW_MEM_MAX_DIM if low_memory else 10**9
         scale = min(1.0, cap / float(max(self.fb_w, self.fb_h)))
@@ -195,6 +203,10 @@ class NativeSlideshow:
                                 stderr=subprocess.DEVNULL)
         deadline = time.time() + self._duration(path) + 15
         while proc.poll() is None:
+            if self._menu_req.is_set():
+                self._prep_menu()     # draw menu to fb0 BEFORE kmssink releases
+                self._sigint(proc)
+                break
             if self._stop.is_set() or time.time() > deadline:
                 self._sigint(proc)
                 break
@@ -333,8 +345,12 @@ class NativeSlideshow:
         bus.connect('message', on_msg)
 
         def tick():
-            # Exit the loop on stop, or when the video set changed (so run()
-            # rebuilds with the new clips). Returning False stops the timer.
+            # Exit the loop on stop, on a menu request (so the menu can take the
+            # framebuffer), or when the video set changed. False stops the timer.
+            if self._menu_req.is_set():
+                self._prep_menu()     # draw menu to fb0 BEFORE kmssink releases
+                gloop.quit()
+                return False
             if self._stop.is_set():
                 gloop.quit()
                 return False
@@ -355,6 +371,93 @@ class NativeSlideshow:
         finally:
             pipe.set_state(Gst.State.NULL)   # clean teardown, no MMAL leak
 
+    # --- settings menu (hot corner) ---
+
+    def _wait(self, seconds):
+        """Sleep up to `seconds`, returning early on stop or a menu request."""
+        end = time.time() + seconds
+        while time.time() < end:
+            if self._stop.is_set() or self._menu_req.is_set():
+                return
+            time.sleep(0.1)
+
+    def _start_touch(self):
+        """Start the TouchReader that opens the settings menu from a hot-corner
+        hold and drives it while open. No-op if native UI deps are missing."""
+        try:
+            from frame import native_ui
+        except Exception as e:
+            logger.warning("Native UI unavailable, no touch menu: %s", e)
+            return
+        self._native_ui = native_ui
+
+        def on_hot_corner():
+            if self._ui is None or self._ui.screen is None:
+                logger.info("Hot corner: opening settings")
+                self._menu_req.set()
+
+        def on_tap(x, y):
+            if self._ui is not None and self._ui.screen is not None:
+                self._menu_activity = time.time()
+                self._ui.tap(x, y)
+
+        self._touch = native_ui.TouchReader(
+            self.fb_w, self.fb_h, on_tap=on_tap, on_hot_corner=on_hot_corner)
+        threading.Thread(target=self._touch.run, daemon=True).start()
+        logger.info("Touch menu armed (hot corner: hold top-right)")
+
+    def _menu_hooks(self):
+        return {
+            'wifi_networks': lambda: [],   # TODO: wire WiFiManager.scan_networks
+            'action': self._menu_action,
+            'info_lines': self._info_lines,
+        }
+
+    def _menu_action(self, name):
+        if name == 'sleep':
+            try:
+                import urllib.request
+                urllib.request.urlopen('http://localhost:8080/sleep', timeout=5)
+            except Exception as e:
+                logger.warning("sleep action failed: %s", e)
+
+    def _info_lines(self):
+        import socket
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            ip = '?'
+        return ['mimir', 'IP: %s' % ip]
+
+    def _prep_menu(self):
+        """Render the menu into the framebuffer. Called BEFORE a video pipeline
+        is torn down so that when kmssink releases the display, fb0 already shows
+        the menu instead of the stale last photo (no photo flash)."""
+        if self._native_ui is None:
+            return False
+        if self._ui is None:
+            self._ui = self._native_ui.NativeUI(
+                hooks=self._menu_hooks(), orientation=self._orientation())
+        if self._ui.screen is None:
+            self._ui.open()                 # renders the menu to fb0
+        self._menu_activity = time.time()
+        return True
+
+    def _open_menu(self):
+        """Show the settings menu and block playback until it closes."""
+        self._menu_req.clear()
+        if not self._prep_menu():
+            return
+        # Block the slideshow while the menu is open; taps are handled by the
+        # TouchReader thread. Auto-close after inactivity so we never hang.
+        while (self._ui.screen is not None and not self._stop.is_set()):
+            if time.time() - self._menu_activity > 45:
+                logger.info("Settings menu: auto-close (idle)")
+                self._ui.screen = None
+                break
+            time.sleep(0.1)
+        logger.info("Settings menu closed, resuming slideshow")
+
     # --- main loop ---
 
     def stop(self):
@@ -362,10 +465,14 @@ class NativeSlideshow:
 
     def run(self):
         logger.info("Native slideshow starting")
+        self._start_touch()
         buf_a = '/tmp/slideshow_a.raw'
         buf_b = '/tmp/slideshow_b.raw'
         cur, nxt = buf_a, buf_b
         while not self._stop.is_set():
+            if self._menu_req.is_set():
+                self._open_menu()
+                continue
             items = self._playlist()
             if not items:
                 logger.info("Slideshow: no media, waiting")
@@ -374,15 +481,23 @@ class NativeSlideshow:
             # Video-only mode: play all clips as one gapless stream, loop.
             if self._videos_only() and all(self._is_video(x) for x in items):
                 self._run_video_wall(items)
+                if self._menu_req.is_set():
+                    self._open_menu()
                 continue
             # Pre-render the first photo so the loop can double-buffer.
             pending = None  # (raw_path, src) already rendered, ready to show
             for i, item in enumerate(items):
                 if self._stop.is_set():
                     break
+                if self._menu_req.is_set():
+                    self._open_menu()
+                    break  # rebuild playlist after the menu
                 if self._is_video(item):
                     pending = None
                     self._play_video(item)
+                    if self._menu_req.is_set():
+                        self._open_menu()
+                        break
                     continue
                 # Photo: use the pre-rendered buffer if it matches, else render now.
                 if pending and pending[1] == item:
@@ -399,7 +514,7 @@ class NativeSlideshow:
                     if self._render_photo(nxt_item, nxt):
                         pending = (nxt, nxt_item)
                     cur, nxt = nxt, cur  # swap buffers
-                self._stop.wait(self._photo_seconds())
+                self._wait(self._photo_seconds())
 
     def _next_photo(self, items, i):
         for j in range(i + 1, len(items)):
