@@ -56,16 +56,16 @@ class NativeSlideshow:
         self._touch = None
         self._native_ui = None
         self._menu_activity = 0.0
-        # Hot-corner hold feedback: a progress ring drawn over the current photo
-        # while the corner is held. _fb_lock serialises the two threads that
-        # write fb0 (main slideshow + the TouchReader-driven ring). _showing_photo
-        # gates the ring to the photo path (over video, kmssink owns the display
-        # so an fb0 write is invisible — the ring is a no-op there). _ring_base is
-        # the clean RGB565 frame cached at hold start, restored on cancel.
+        # Hot-corner hold feedback: a centred progress overlay (dimmed backdrop +
+        # ring + caption) while the corner is held. _fb_lock serialises the two
+        # threads that write fb0 (main slideshow + the TouchReader-driven overlay).
+        # _showing_photo means fb0 is ours (a photo is up, or a video reveal is
+        # active) so the overlay can be drawn directly. _hold_bg is the cached
+        # dimmed backdrop PIL image for the current hold.
         self._fb_lock = threading.Lock()
         self._cur_fb_raw = None
         self._showing_photo = False
-        self._ring_base = None
+        self._hold_bg = None
         # Over video the ring can't be drawn under kmssink; a hold instead sets
         # _hold_req, the player tears down, and the main loop runs _hold_overlay
         # to draw the ring on a revealed framebuffer. _hold_frac is the latest
@@ -430,7 +430,7 @@ class NativeSlideshow:
                 self._ui.tap(x, y)
 
         def on_hot_corner_fire():
-            self._ring_base = None     # the menu is about to take the framebuffer
+            self._hold_bg = None       # the menu is about to take the framebuffer
             on_hot_corner()
 
         self._touch = native_ui.TouchReader(
@@ -469,108 +469,112 @@ class NativeSlideshow:
             ip = '?'
         return ['mimir', 'IP: %s' % ip]
 
-    # --- hot-corner hold feedback (progress ring over the current photo) ---
+    # --- hot-corner hold feedback (a centred progress overlay while held) ---
 
     _RING_RAW = '/tmp/slideshow_ring.raw'
-    _RING_CX_MARGIN = 120     # ring centre inset from the top-right corner
-    _RING_R = 70
-    _RING_TH = 12
-
-    @staticmethod
-    def _rgb565(r, g, b):
-        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-
-    def _render_hot_ring(self, frac):
-        """Composite a circular hold-progress ring near the top-right corner
-        (where the hot corner is) onto the cached clean photo, in RGB565."""
-        import numpy as np
-        base = self._ring_base
-        if base is None:
-            return None
-        try:
-            arr = np.frombuffer(base, dtype='<u2').reshape(self.fb_h, self.fb_w).copy()
-        except Exception:
-            return None
-        cx, cy = self.fb_w - self._RING_CX_MARGIN, self._RING_CX_MARGIN
-        R, th = self._RING_R, self._RING_TH
-        box = R + th
-        x0, x1 = max(0, cx - box), min(self.fb_w, cx + box + 1)
-        y0, y1 = max(0, cy - box), min(self.fb_h, cy + box + 1)
-        ys = (np.arange(y0, y1) - cy).reshape(-1, 1)
-        xs = (np.arange(x0, x1) - cx).reshape(1, -1)
-        dist = np.sqrt(xs * xs + ys * ys)
-        ring = np.abs(dist - R) <= th / 2.0
-        ang = np.degrees(np.arctan2(xs, -ys)) % 360.0   # 0 at top, clockwise
-        sub = arr[y0:y1, x0:x1]
-        sub[ring] = self._rgb565(70, 78, 90)             # faint full track
-        sub[ring & (ang <= frac * 360.0)] = self._rgb565(64, 142, 232)  # filled
-        return arr.tobytes()
 
     def _dd(self, raw_path):
         subprocess.run(['sudo', 'dd', f'if={raw_path}', 'of=/dev/fb0', 'bs=4M'],
                        capture_output=True, timeout=10)
+
+    def _build_hold_bg(self, from_raw):
+        """A dimmed backdrop for the hold overlay: the current photo darkened,
+        or a dark panel when none is available (e.g. a hold over video)."""
+        from PIL import Image, ImageEnhance
+        import numpy as np
+        try:
+            if from_raw and os.path.exists(from_raw):
+                data = open(from_raw, 'rb').read()
+                a = np.frombuffer(data, dtype='<u2').astype(np.uint32)
+                a = a[:self.fb_w * self.fb_h].reshape(self.fb_h, self.fb_w)
+                r = ((a >> 11) & 0x1F) << 3
+                g = ((a >> 5) & 0x3F) << 2
+                b = (a & 0x1F) << 3
+                rgb = np.dstack([r, g, b]).astype('uint8')
+                return ImageEnhance.Brightness(
+                    Image.fromarray(rgb, 'RGB')).enhance(0.25)
+        except Exception as e:
+            logger.debug("hold backdrop from photo failed: %s", e)
+        from PIL import Image
+        return Image.new('RGB', (self.fb_w, self.fb_h), (16, 18, 22))
+
+    def _draw_hold(self, frac):
+        """Draw the centred progress ring + caption on the cached backdrop and
+        push it to fb0 (smooth PIL arc, not a blocky numpy ring)."""
+        from PIL import ImageDraw
+        import numpy as np
+        if self._hold_bg is None:
+            return
+        im = self._hold_bg.copy()
+        d = ImageDraw.Draw(im)
+        cx, cy = self.fb_w // 2, self.fb_h // 2
+        R = max(60, min(self.fb_w, self.fb_h) // 7)
+        th = max(12, R // 6)
+        box = (cx - R, cy - R, cx + R, cy + R)
+        d.arc(box, 0, 360, fill=(70, 78, 90), width=th)              # track
+        frac = max(0.0, min(1.0, frac))
+        if frac > 0:
+            d.arc(box, -90, -90 + int(frac * 360), fill=(64, 142, 232), width=th)
+        try:
+            f = self._native_ui.FbCanvas.font(max(24, R // 3))
+            d.text((cx, cy + R + int(R * 0.55)), 'Einstellungen', anchor='mm',
+                   fill=(214, 218, 224), font=f)
+        except Exception:
+            pass
+        a = np.asarray(im, dtype=np.uint16)
+        r, g, b = a[:, :, 0], a[:, :, 1], a[:, :, 2]
+        packed = (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)).astype('<u2')
+        with open(self._RING_RAW, 'wb') as fh:
+            fh.write(packed.tobytes())
+        with self._fb_lock:
+            self._dd(self._RING_RAW)
 
     def _on_hot_progress(self, frac):
         # Ignore while the menu is already open.
         if self._ui is not None and self._ui.screen is not None:
             return
         self._hold_frac = frac
-        if self._showing_photo and self._cur_fb_raw is not None:
-            # Over a photo: composite the ring straight onto it on fb0.
+        if self._showing_photo:
+            # fb0 is ours (a photo is up): draw the overlay directly.
             try:
-                if self._ring_base is None:
-                    with open(self._cur_fb_raw, 'rb') as f:
-                        self._ring_base = f.read()
-                frame = self._render_hot_ring(frac)
-                if frame is None:
-                    return
-                with open(self._RING_RAW, 'wb') as f:
-                    f.write(frame)
-                with self._fb_lock:
-                    self._dd(self._RING_RAW)
+                if self._hold_bg is None:
+                    self._hold_bg = self._build_hold_bg(self._cur_fb_raw)
+                self._draw_hold(frac)
             except Exception as e:
-                logger.debug("hot ring draw failed: %s", e)
+                logger.debug("hold draw failed: %s", e)
         elif frac >= 0.12 and not self._hold_req.is_set():
-            # Over video: fb0 is hidden by kmssink, so ask the player to tear
-            # down and let the main loop draw the ring on a revealed fb0
-            # (_hold_overlay). Debounced so a quick corner brush doesn't tear.
+            # Over video kmssink hides fb0: ask the player to tear down so the
+            # main loop can run _hold_overlay on a revealed fb0. Debounced so a
+            # quick accidental corner brush doesn't interrupt playback.
             self._hold_req.set()
 
     def _on_hot_cancel(self):
         # Released / wandered out before the hold filled.
-        self._hold_req.clear()          # stop/skip any video-reveal overlay
-        base = self._ring_base
-        self._ring_base = None
-        if base is None or not self._showing_photo or self._cur_fb_raw is None:
-            return
-        try:
-            with self._fb_lock:         # restore the clean photo under the ring
-                self._dd(self._cur_fb_raw)
-        except Exception:
-            pass
+        self._hold_req.clear()
+        had_bg = self._hold_bg is not None
+        self._hold_bg = None
+        if had_bg and self._showing_photo and self._cur_fb_raw:
+            try:
+                with self._fb_lock:     # restore the clean photo under the overlay
+                    self._dd(self._cur_fb_raw)
+            except Exception:
+                pass
 
     def _hold_overlay(self):
-        """A hot-corner hold happened over video: the player has torn down, so
-        fb0 is ours. Draw the progress ring on a dark backdrop, updating from
-        _hold_frac, until the hold completes (menu opens) or is cancelled."""
-        import numpy as np
+        """A hold happened over video: the player has torn down, so fb0 is ours.
+        Draw the progress overlay (dimmed last photo / dark) until the hold
+        completes (menu opens) or is cancelled."""
         try:
-            self._ring_base = np.zeros((self.fb_h, self.fb_w),
-                                       dtype='<u2').tobytes()
-            self._showing_photo = True          # lets _render_hot_ring run
+            self._hold_bg = self._build_hold_bg(self._cur_fb_raw)
+            self._showing_photo = True
             while (self._hold_req.is_set() and not self._menu_req.is_set()
                    and not self._stop.is_set()):
-                frame = self._render_hot_ring(self._hold_frac)
-                if frame:
-                    with open(self._RING_RAW, 'wb') as f:
-                        f.write(frame)
-                    with self._fb_lock:
-                        self._dd(self._RING_RAW)
+                self._draw_hold(self._hold_frac)
                 time.sleep(0.05)
         except Exception as e:
             logger.debug("hold overlay failed: %s", e)
         finally:
-            self._ring_base = None
+            self._hold_bg = None
             self._showing_photo = False
             self._hold_req.clear()
 

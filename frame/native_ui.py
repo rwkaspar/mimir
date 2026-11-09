@@ -560,8 +560,9 @@ class DisplayScreen(Screen):
         if self.state is None:
             fs = self.ui.api_get('/api/frame/settings') or {}
             es = fs.get('energy_save', {}) or {}
+            live = self.ui.read_brightness()        # real DDC/CI value
             self.state = {
-                'brightness': int(es.get('brightness', 80) or 80),
+                'brightness': live if live is not None else int(es.get('brightness', 80) or 80),
                 'orientation': (fs.get('frame', {}) or {}).get('orientation', 'horizontal'),
             }
 
@@ -813,6 +814,22 @@ class NativeUI:
         except Exception as e:
             logger.warning('api_post %s failed: %s', path, e)
             return None
+
+    def read_brightness(self):
+        """The panel's real current brightness via DDC/CI (VCP 10), or None.
+
+        The server's get_brightness() only returns a cached value (often the
+        boot default), so the slider reads the hardware directly — the frame
+        user has NOPASSWD sudo for ddcutil. ~0.5s, run once when Anzeige opens."""
+        try:
+            out = subprocess.run(['sudo', 'ddcutil', 'getvcp', '10'],
+                                 capture_output=True, text=True, timeout=5)
+            m = re.search(r'current value\s*=\s*(\d+)', out.stdout)
+            if m:
+                return max(0, min(100, int(m.group(1))))
+        except Exception as e:
+            logger.warning('read_brightness failed: %s', e)
+        return None
 
     def open(self):
         self.screen = RootMenu(self)
