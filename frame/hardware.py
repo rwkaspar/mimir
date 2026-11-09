@@ -83,9 +83,13 @@ def transcode_profile(full_power: bool = False) -> dict:
         # at a capped output resolution, 'veryfast' (deblock back on) is well
         # within budget and decodes much cleaner on the Pi HW decoder.
         'preset': 'veryfast' if low else 'fast',
-        'crf': 24 if low else 23,
-        'maxrate_k': 6000 if low else 8000,
-        'bufsize_k': 12000 if low else 16000,
+        # CRF 20 (was 24) for weak boards: we now transcode during sleep with
+        # the display off and every core free, so there is budget for a sharper
+        # encode. 24 left family videos visibly soft; 20 is near-transparent at
+        # this resolution and still well within the maxrate cap.
+        'crf': 20 if low else 23,
+        'maxrate_k': 8000,
+        'bufsize_k': 16000,
         'fps_cap': 30 if low else 60,
         # H.264 level must admit the output frame size: 1920x1200 (and the
         # 1200x1920 portrait variant) is 9000 macroblocks/frame, which exceeds

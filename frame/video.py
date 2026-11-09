@@ -190,7 +190,14 @@ def transcode_video(source_path: Path, output_dir: Path,
             '-threads', threads,
             '-i', str(source_path),
             '-vf', scale_filter,
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
+            # NOT 'ultrafast': this intermediate is the SOURCE for the final
+            # encode, and ultrafast disables the in-loop deblocking filter, so
+            # it bakes macroblock softening/smear into every later pass (the
+            # visible "washed-out" look on portrait 4K phone clips that hit this
+            # pre-scale path). 'veryfast' + a near-visually-lossless crf keeps
+            # the intermediate crisp; it stays small (decode buffers depend on
+            # resolution, not bitrate, so the low-memory goal is unaffected).
+            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '16',
             '-pix_fmt', 'yuv420p',
             '-x264-params', f'threads={threads}',
             '-an',
