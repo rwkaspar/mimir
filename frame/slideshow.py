@@ -56,6 +56,16 @@ class NativeSlideshow:
         self._touch = None
         self._native_ui = None
         self._menu_activity = 0.0
+        # Hot-corner hold feedback: a progress ring drawn over the current photo
+        # while the corner is held. _fb_lock serialises the two threads that
+        # write fb0 (main slideshow + the TouchReader-driven ring). _showing_photo
+        # gates the ring to the photo path (over video, kmssink owns the display
+        # so an fb0 write is invisible — the ring is a no-op there). _ring_base is
+        # the clean RGB565 frame cached at hold start, restored on cancel.
+        self._fb_lock = threading.Lock()
+        self._cur_fb_raw = None
+        self._showing_photo = False
+        self._ring_base = None
         # Target render size = panel, capped on weak boards.
         cap = LOW_MEM_MAX_DIM if low_memory else 10**9
         scale = min(1.0, cap / float(max(self.fb_w, self.fb_h)))
@@ -114,8 +124,10 @@ class NativeSlideshow:
 
     def _write_fb(self, raw_path):
         # /dev/fb0 is root:video 660; use sudo dd (matches energy.py).
-        subprocess.run(['sudo', 'dd', f'if={raw_path}', 'of=/dev/fb0', 'bs=4M'],
-                       capture_output=True, timeout=10)
+        with self._fb_lock:
+            subprocess.run(['sudo', 'dd', f'if={raw_path}', 'of=/dev/fb0', 'bs=4M'],
+                           capture_output=True, timeout=10)
+            self._cur_fb_raw = raw_path
 
     # --- playlist ---
 
@@ -194,6 +206,7 @@ class NativeSlideshow:
             return False
 
     def _play_video(self, path):
+        self._showing_photo = False     # over video the fb0 ring is invisible
         logger.info("Slideshow video: %s", path)
         cmd = ['gst-launch-1.0', '-q',
                'filesrc', f'location={path}', '!', 'qtdemux', '!',
@@ -290,6 +303,7 @@ class NativeSlideshow:
         Order is already the daily-fixed shuffle from _playlist().
         """
         logger.info("Video wall: %d clip(s)", len(videos))
+        self._showing_photo = False     # over video the fb0 ring is invisible
         try:
             import gi  # noqa: F401
             self._video_wall_seamless(videos)
@@ -401,8 +415,13 @@ class NativeSlideshow:
                 self._menu_activity = time.time()
                 self._ui.tap(x, y)
 
+        def on_hot_corner_fire():
+            self._ring_base = None     # the menu is about to take the framebuffer
+            on_hot_corner()
+
         self._touch = native_ui.TouchReader(
-            self.fb_w, self.fb_h, on_tap=on_tap, on_hot_corner=on_hot_corner)
+            self.fb_w, self.fb_h, on_tap=on_tap, on_hot_corner=on_hot_corner_fire,
+            on_hot_progress=self._on_hot_progress, on_hot_cancel=self._on_hot_cancel)
         threading.Thread(target=self._touch.run, daemon=True).start()
         logger.info("Touch menu armed (hot corner: hold top-right)")
 
@@ -435,6 +454,80 @@ class NativeSlideshow:
         except Exception:
             ip = '?'
         return ['mimir', 'IP: %s' % ip]
+
+    # --- hot-corner hold feedback (progress ring over the current photo) ---
+
+    _RING_RAW = '/tmp/slideshow_ring.raw'
+    _RING_CX_MARGIN = 120     # ring centre inset from the top-right corner
+    _RING_R = 70
+    _RING_TH = 12
+
+    @staticmethod
+    def _rgb565(r, g, b):
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+    def _render_hot_ring(self, frac):
+        """Composite a circular hold-progress ring near the top-right corner
+        (where the hot corner is) onto the cached clean photo, in RGB565."""
+        import numpy as np
+        base = self._ring_base
+        if base is None:
+            return None
+        try:
+            arr = np.frombuffer(base, dtype='<u2').reshape(self.fb_h, self.fb_w).copy()
+        except Exception:
+            return None
+        cx, cy = self.fb_w - self._RING_CX_MARGIN, self._RING_CX_MARGIN
+        R, th = self._RING_R, self._RING_TH
+        box = R + th
+        x0, x1 = max(0, cx - box), min(self.fb_w, cx + box + 1)
+        y0, y1 = max(0, cy - box), min(self.fb_h, cy + box + 1)
+        ys = (np.arange(y0, y1) - cy).reshape(-1, 1)
+        xs = (np.arange(x0, x1) - cx).reshape(1, -1)
+        dist = np.sqrt(xs * xs + ys * ys)
+        ring = np.abs(dist - R) <= th / 2.0
+        ang = np.degrees(np.arctan2(xs, -ys)) % 360.0   # 0 at top, clockwise
+        sub = arr[y0:y1, x0:x1]
+        sub[ring] = self._rgb565(70, 78, 90)             # faint full track
+        sub[ring & (ang <= frac * 360.0)] = self._rgb565(64, 142, 232)  # filled
+        return arr.tobytes()
+
+    def _dd(self, raw_path):
+        subprocess.run(['sudo', 'dd', f'if={raw_path}', 'of=/dev/fb0', 'bs=4M'],
+                       capture_output=True, timeout=10)
+
+    def _on_hot_progress(self, frac):
+        # Only over a live photo and only when no menu is open (over video the
+        # kmssink plane hides fb0, so a write would be invisible — skip it).
+        if self._ui is not None and self._ui.screen is not None:
+            return
+        if not self._showing_photo or self._cur_fb_raw is None:
+            return
+        try:
+            if self._ring_base is None:
+                with open(self._cur_fb_raw, 'rb') as f:
+                    self._ring_base = f.read()
+            frame = self._render_hot_ring(frac)
+            if frame is None:
+                return
+            with open(self._RING_RAW, 'wb') as f:
+                f.write(frame)
+            with self._fb_lock:
+                self._dd(self._RING_RAW)
+        except Exception as e:
+            logger.debug("hot ring draw failed: %s", e)
+
+    def _on_hot_cancel(self):
+        # Released / wandered out before the hold filled: restore the clean photo.
+        base = self._ring_base
+        self._ring_base = None
+        if base is None or self._cur_fb_raw is None:
+            return
+        try:
+            with self._fb_lock:
+                self._dd(self._cur_fb_raw)
+        except Exception:
+            pass
 
     def _prep_menu(self):
         """Render the menu into the framebuffer. Called BEFORE a video pipeline
@@ -514,6 +607,7 @@ class NativeSlideshow:
                         continue
                     raw = cur
                 self._write_fb(raw)
+                self._showing_photo = True     # enable hot-corner ring over it
                 # While this photo is up, render the NEXT photo into the other buf.
                 nxt_item = self._next_photo(items, i)
                 pending = None

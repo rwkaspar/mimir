@@ -410,10 +410,16 @@ class TouchReader:
     """
 
     def __init__(self, screen_w, screen_h, on_tap=None, on_hot_corner=None,
-                 node=TOUCH_NODE, flip_x=False, flip_y=False, swap=False):
+                 node=TOUCH_NODE, flip_x=False, flip_y=False, swap=False,
+                 on_hot_progress=None, on_hot_cancel=None):
         self.w, self.h = screen_w, screen_h
         self.on_tap = on_tap
         self.on_hot_corner = on_hot_corner
+        # on_hot_progress(frac 0..1) is called repeatedly while a touch is held
+        # in the hot corner (for a hold-progress indicator); on_hot_cancel() once
+        # if the hold ends (released / moved out) before it completes.
+        self.on_hot_progress = on_hot_progress
+        self.on_hot_cancel = on_hot_cancel
         self.node = node
         self.flip_x, self.flip_y, self.swap = flip_x, flip_y, swap
         self._stop = threading.Event()
@@ -491,6 +497,8 @@ class TouchReader:
             down_t = 0.0
             hot_fired = False
             reopen = False
+            prog_active = False      # a hold-in-corner is building progress
+            last_prog = 0.0          # last on_hot_progress emit time
             while not self._stop.is_set() and not reopen:
                 try:
                     r, _, _ = select.select([f], [], [], 0.1)
@@ -502,11 +510,25 @@ class TouchReader:
                     if (down and not hot_fired and rx is not None
                             and ry is not None):
                         x, y = self._map(rx, ry)
-                        if (self._in_hot_corner(x, y)
-                                and (now - down_t) * 1000 >= HOLD_MS):
-                            hot_fired = True
-                            if self.on_hot_corner:
-                                self.on_hot_corner()
+                        if self._in_hot_corner(x, y):
+                            elapsed = (now - down_t) * 1000
+                            frac = min(1.0, elapsed / HOLD_MS)
+                            prog_active = True
+                            if self.on_hot_progress and now - last_prog >= 0.07:
+                                last_prog = now
+                                self.on_hot_progress(frac)
+                            if elapsed >= HOLD_MS:
+                                hot_fired = True
+                                prog_active = False
+                                if self.on_hot_progress:
+                                    self.on_hot_progress(1.0)
+                                if self.on_hot_corner:
+                                    self.on_hot_corner()
+                        elif prog_active:
+                            # finger wandered out of the corner mid-hold -> cancel
+                            prog_active = False
+                            if self.on_hot_cancel:
+                                self.on_hot_cancel()
                     if not r:
                         continue
                     try:
@@ -529,6 +551,7 @@ class TouchReader:
                     elif et == EV_KEY and code == BTN_TOUCH:
                         if val == 1:
                             down, down_t, hot_fired = True, now, False
+                            prog_active = False
                         elif val == 0:
                             if (down and not hot_fired and rx is not None
                                     and ry is not None):
@@ -536,6 +559,9 @@ class TouchReader:
                                 if ((now - down_t) * 1000 < HOLD_MS
                                         and self.on_tap):
                                     self.on_tap(x, y)
+                            if prog_active and not hot_fired and self.on_hot_cancel:
+                                self.on_hot_cancel()   # released before it filled
+                            prog_active = False
                             down = False
                 except Exception as e:
                     logger.warning('TouchReader: event handling error: %s', e)
