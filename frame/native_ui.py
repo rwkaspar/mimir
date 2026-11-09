@@ -396,8 +396,14 @@ class InfoBlock(Widget):
         lh = min(44, (y1 - y0) // n)               # cap line height (no spreading)
         sfont = canvas.font(max(16, int(lh * 0.6)))
         ly = y0 + lh // 2
+        maxw = (x1 - x0) - 12
         for ln in lines:
-            d.text((x0 + 6, int(ly)), ln, font=sfont, fill=MUTED, anchor='lm')
+            s = ln
+            while s and d.textlength(s, font=sfont) > maxw:
+                s = s[:-2]
+            if s != ln and len(s) > 1:
+                s = s[:-1] + '…'
+            d.text((x0 + 6, int(ly)), s, font=sfont, fill=MUTED, anchor='lm')
             ly += lh
 
 
@@ -434,7 +440,13 @@ class QRBlock(Widget):
             d.text(((x0 + x1) // 2, y0 + area // 2), 'QR …', font=font,
                    fill=MUTED, anchor='mm')
         if self.caption:
-            d.text(((x0 + x1) // 2, y1 - cap_h // 2), self.caption, font=font,
+            maxw = (x1 - x0) * 0.94
+            size = max(14, int(cap_h * 0.5))
+            cf = canvas.font(size)
+            while size > 11 and d.textlength(self.caption, font=cf) > maxw:
+                size -= 2
+                cf = canvas.font(size)
+            d.text(((x0 + x1) // 2, y1 - cap_h // 2), self.caption, font=cf,
                    fill=MUTED, anchor='mm')
 
 
@@ -754,7 +766,7 @@ class QRScreen(Screen):
         super().__init__(ui)
         self.path = path
         self._mods = None
-        self._url = None
+        self._cap = None
 
     def widgets(self):
         if self._mods is None:
@@ -763,11 +775,14 @@ class QRScreen(Screen):
             ips = acc.get('ips', []) or []
             ip = ips[0] if ips else 'mimir.local'
             sep = '&' if '?' in self.path else '?'
-            self._url = 'http://%s:8080%s%stoken=%s' % (ip, self.path, sep, token)
-            qr = self.ui.api_get('/api/qrcode?text=' + _q(self._url)) or {}
+            url = 'http://%s:8080%s%stoken=%s' % (ip, self.path, sep, token)
+            # The QR carries the full tokenised URL; the caption is just a short
+            # human hint (no token), so it fits the card.
+            self._cap = '%s:8080%s' % (ip, self.path)
+            qr = self.ui.api_get('/api/qrcode?text=' + _q(url)) or {}
             self._mods = qr.get('modules')
         return [
-            QRBlock('qr', self._mods, caption=self._url.replace('http://', '')),
+            QRBlock('qr', self._mods, caption=self._cap),
             self.back_row(),
         ]
 
