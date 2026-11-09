@@ -66,6 +66,12 @@ class NativeSlideshow:
         self._cur_fb_raw = None
         self._showing_photo = False
         self._ring_base = None
+        # Over video the ring can't be drawn under kmssink; a hold instead sets
+        # _hold_req, the player tears down, and the main loop runs _hold_overlay
+        # to draw the ring on a revealed framebuffer. _hold_frac is the latest
+        # progress from the TouchReader thread.
+        self._hold_req = threading.Event()
+        self._hold_frac = 0.0
         # Target render size = panel, capped on weak boards.
         cap = LOW_MEM_MAX_DIM if low_memory else 10**9
         scale = min(1.0, cap / float(max(self.fb_w, self.fb_h)))
@@ -220,10 +226,13 @@ class NativeSlideshow:
                 self._prep_menu()     # draw menu to fb0 BEFORE kmssink releases
                 self._sigint(proc)
                 break
+            if self._hold_req.is_set():
+                self._sigint(proc)    # reveal fb0 for the hold-progress ring
+                break
             if self._stop.is_set() or time.time() > deadline:
                 self._sigint(proc)
                 break
-            time.sleep(0.3)
+            time.sleep(0.1)
 
     @staticmethod
     def _sigint(proc):
@@ -316,9 +325,11 @@ class NativeSlideshow:
                 self._play_video(joined)
             else:
                 for v in videos:
-                    if self._stop.is_set():
+                    if self._stop.is_set() or self._hold_req.is_set():
                         break
                     self._play_video(v)
+            if self._menu_req.is_set() or self._hold_req.is_set():
+                return  # let run() handle the menu / hold overlay
             if self._video_sig(self._collect_videos()) != self._video_sig(videos):
                 return  # media changed -> let run() rebuild the playlist
 
@@ -365,6 +376,9 @@ class NativeSlideshow:
                 self._prep_menu()     # draw menu to fb0 BEFORE kmssink releases
                 gloop.quit()
                 return False
+            if self._hold_req.is_set():
+                gloop.quit()          # reveal fb0 for the hold-progress ring
+                return False
             if self._stop.is_set():
                 gloop.quit()
                 return False
@@ -374,7 +388,7 @@ class NativeSlideshow:
                 return False
             return True
 
-        GLib.timeout_add(1000, tick)
+        GLib.timeout_add(150, tick)
         pipe.set_state(Gst.State.PAUSED)
         pipe.get_state(Gst.CLOCK_TIME_NONE)
         if not seg_seek(True):
@@ -497,37 +511,68 @@ class NativeSlideshow:
                        capture_output=True, timeout=10)
 
     def _on_hot_progress(self, frac):
-        # Only over a live photo and only when no menu is open (over video the
-        # kmssink plane hides fb0, so a write would be invisible — skip it).
+        # Ignore while the menu is already open.
         if self._ui is not None and self._ui.screen is not None:
             return
-        if not self._showing_photo or self._cur_fb_raw is None:
-            return
-        try:
-            if self._ring_base is None:
-                with open(self._cur_fb_raw, 'rb') as f:
-                    self._ring_base = f.read()
-            frame = self._render_hot_ring(frac)
-            if frame is None:
-                return
-            with open(self._RING_RAW, 'wb') as f:
-                f.write(frame)
-            with self._fb_lock:
-                self._dd(self._RING_RAW)
-        except Exception as e:
-            logger.debug("hot ring draw failed: %s", e)
+        self._hold_frac = frac
+        if self._showing_photo and self._cur_fb_raw is not None:
+            # Over a photo: composite the ring straight onto it on fb0.
+            try:
+                if self._ring_base is None:
+                    with open(self._cur_fb_raw, 'rb') as f:
+                        self._ring_base = f.read()
+                frame = self._render_hot_ring(frac)
+                if frame is None:
+                    return
+                with open(self._RING_RAW, 'wb') as f:
+                    f.write(frame)
+                with self._fb_lock:
+                    self._dd(self._RING_RAW)
+            except Exception as e:
+                logger.debug("hot ring draw failed: %s", e)
+        elif frac >= 0.12 and not self._hold_req.is_set():
+            # Over video: fb0 is hidden by kmssink, so ask the player to tear
+            # down and let the main loop draw the ring on a revealed fb0
+            # (_hold_overlay). Debounced so a quick corner brush doesn't tear.
+            self._hold_req.set()
 
     def _on_hot_cancel(self):
-        # Released / wandered out before the hold filled: restore the clean photo.
+        # Released / wandered out before the hold filled.
+        self._hold_req.clear()          # stop/skip any video-reveal overlay
         base = self._ring_base
         self._ring_base = None
-        if base is None or self._cur_fb_raw is None:
+        if base is None or not self._showing_photo or self._cur_fb_raw is None:
             return
         try:
-            with self._fb_lock:
+            with self._fb_lock:         # restore the clean photo under the ring
                 self._dd(self._cur_fb_raw)
         except Exception:
             pass
+
+    def _hold_overlay(self):
+        """A hot-corner hold happened over video: the player has torn down, so
+        fb0 is ours. Draw the progress ring on a dark backdrop, updating from
+        _hold_frac, until the hold completes (menu opens) or is cancelled."""
+        import numpy as np
+        try:
+            self._ring_base = np.zeros((self.fb_h, self.fb_w),
+                                       dtype='<u2').tobytes()
+            self._showing_photo = True          # lets _render_hot_ring run
+            while (self._hold_req.is_set() and not self._menu_req.is_set()
+                   and not self._stop.is_set()):
+                frame = self._render_hot_ring(self._hold_frac)
+                if frame:
+                    with open(self._RING_RAW, 'wb') as f:
+                        f.write(frame)
+                    with self._fb_lock:
+                        self._dd(self._RING_RAW)
+                time.sleep(0.05)
+        except Exception as e:
+            logger.debug("hold overlay failed: %s", e)
+        finally:
+            self._ring_base = None
+            self._showing_photo = False
+            self._hold_req.clear()
 
     def _prep_menu(self):
         """Render the menu into the framebuffer. Called BEFORE a video pipeline
@@ -546,6 +591,7 @@ class NativeSlideshow:
     def _open_menu(self):
         """Show the settings menu and block playback until it closes."""
         self._menu_req.clear()
+        self._hold_req.clear()
         if not self._prep_menu():
             return
         # Block the slideshow while the menu is open; taps are handled by the
@@ -581,6 +627,8 @@ class NativeSlideshow:
             # Video-only mode: play all clips as one gapless stream, loop.
             if self._videos_only() and all(self._is_video(x) for x in items):
                 self._run_video_wall(items)
+                if self._hold_req.is_set():
+                    self._hold_overlay()
                 if self._menu_req.is_set():
                     self._open_menu()
                 continue
@@ -595,6 +643,8 @@ class NativeSlideshow:
                 if self._is_video(item):
                     pending = None
                     self._play_video(item)
+                    if self._hold_req.is_set():
+                        self._hold_overlay()     # draw the ring on revealed fb0
                     if self._menu_req.is_set():
                         self._open_menu()
                         break
@@ -608,6 +658,7 @@ class NativeSlideshow:
                     raw = cur
                 self._write_fb(raw)
                 self._showing_photo = True     # enable hot-corner ring over it
+                self._hold_req.clear()         # photo path draws directly, no reveal
                 # While this photo is up, render the NEXT photo into the other buf.
                 nxt_item = self._next_photo(items, i)
                 pending = None
