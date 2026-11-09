@@ -129,240 +129,690 @@ CARD = (26, 30, 36)
 DANGER = (184, 54, 54)
 
 
-class Button:
-    """A tappable rectangle with a label. rect = (x0, y0, x1, y1)."""
+def _hit(rect, x, y):
+    if not rect:
+        return False
+    x0, y0, x1, y1 = rect
+    return x0 <= x <= x1 and y0 <= y <= y1
 
-    def __init__(self, key, label, rect, kind='row'):
+
+class Widget:
+    """One stacked row on a Screen. `weight` sizes its share of the card; a tap
+    returns a nav target (Screen), 'close', or None. Subclasses draw + react."""
+
+    weight = 1.0
+
+    def __init__(self, key, kind='row'):
         self.key = key
-        self.label = label
-        self.rect = rect
-        self.kind = kind  # 'row' | 'primary' | 'back'
+        self.kind = kind
+        self.rect = None
 
     def hit(self, x, y):
+        return _hit(self.rect, x, y)
+
+    def render(self, scr, d, canvas, font):
+        pass
+
+    def tap(self, scr, x, y):
+        return None
+
+
+class Row(Widget):
+    """A plain tappable row: navigates (target) or runs an action (on_tap)."""
+
+    def __init__(self, key, label, target=None, on_tap=None, kind='row',
+                 value=None):
+        super().__init__(key, kind)
+        self.label = label
+        self.target = target     # callable -> Screen
+        self.on_tap = on_tap     # callable -> None | 'close' | Screen
+        self.value = value       # optional right-aligned status text
+
+    def render(self, scr, d, canvas, font):
         x0, y0, x1, y1 = self.rect
-        return x0 <= x <= x1 and y0 <= y <= y1
+        fill, tcol = ROW, FG
+        if self.kind == 'primary':
+            fill, tcol = ACCENT, ACCENT_FG
+        elif self.kind == 'danger':
+            fill, tcol = DANGER, ACCENT_FG
+        elif self.kind == 'back':
+            fill, tcol = CARD, MUTED
+        d.rounded_rectangle(self.rect, radius=12, fill=fill)
+        pad = int((y1 - y0) * 0.32)
+        d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font, fill=tcol,
+               anchor='lm')
+        if self.value is not None:
+            d.text((x1 - pad, (y0 + y1) // 2), str(self.value), font=font,
+                   fill=MUTED, anchor='rm')
+        elif self.target is not None and self.kind != 'back':
+            cy = (y0 + y1) // 2
+            cx = x1 - pad
+            s = max(7, int((y1 - y0) * 0.12))
+            d.polygon([(cx - s, cy - s), (cx, cy), (cx - s, cy + s)], fill=MUTED)
+
+    def tap(self, scr, x, y):
+        if self.on_tap:
+            return self.on_tap()
+        if self.target:
+            return self.target()
+        return None
+
+
+class Toggle(Widget):
+    """Label + ON/OFF pill. get() -> bool, set(bool) applies + persists."""
+
+    def __init__(self, key, label, get, set_):
+        super().__init__(key)
+        self.label = label
+        self.get = get
+        self.set_ = set_
+
+    def render(self, scr, d, canvas, font):
+        x0, y0, x1, y1 = self.rect
+        d.rounded_rectangle(self.rect, radius=12, fill=ROW)
+        pad = int((y1 - y0) * 0.32)
+        d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font, fill=FG,
+               anchor='lm')
+        on = bool(self.get())
+        pw = int((y1 - y0) * 1.7)
+        ph = int((y1 - y0) * 0.52)
+        px1 = x1 - pad
+        px0 = px1 - pw
+        pcy = (y0 + y1) // 2
+        track = ACCENT if on else (70, 78, 90)
+        d.rounded_rectangle((px0, pcy - ph // 2, px1, pcy + ph // 2),
+                            radius=ph // 2, fill=track)
+        kr = ph // 2 - 3
+        kx = px1 - kr - 3 if on else px0 + kr + 3
+        d.ellipse((kx - kr, pcy - kr, kx + kr, pcy + kr), fill=(255, 255, 255))
+
+    def tap(self, scr, x, y):
+        try:
+            self.set_(not bool(self.get()))
+        except Exception as e:
+            logger.warning('toggle %s failed: %s', self.key, e)
+        return 'rerender'
+
+
+class Stepper(Widget):
+    """Label + value + [−]/[+] buttons. dec()/inc() mutate; fmt() shows value."""
+
+    def __init__(self, key, label, fmt, dec, inc):
+        super().__init__(key)
+        self.label = label
+        self.fmt = fmt
+        self.dec = dec
+        self.inc = inc
+        self._minus = self._plus = None
+
+    def render(self, scr, d, canvas, font):
+        x0, y0, x1, y1 = self.rect
+        d.rounded_rectangle(self.rect, radius=12, fill=ROW)
+        pad = int((y1 - y0) * 0.32)
+        d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font, fill=FG,
+               anchor='lm')
+        bs = int((y1 - y0) * 0.66)
+        cy = (y0 + y1) // 2
+        pb1 = x1 - pad
+        self._plus = (pb1 - bs, cy - bs // 2, pb1, cy + bs // 2)
+        val_w = int(bs * 2.4)
+        self._minus = (pb1 - bs - val_w - bs, cy - bs // 2, pb1 - bs - val_w, cy + bs // 2)
+        for rect, plus in ((self._minus, False), (self._plus, True)):
+            d.rounded_rectangle(rect, radius=10, fill=(70, 78, 90))
+            mx = (rect[0] + rect[2]) // 2
+            my = (rect[1] + rect[3]) // 2
+            arm = int((rect[2] - rect[0]) * 0.26)
+            d.line((mx - arm, my, mx + arm, my), fill=FG, width=3)   # minus bar
+            if plus:
+                d.line((mx, my - arm, mx, my + arm), fill=FG, width=3)  # vertical
+        d.text(((self._minus[2] + self._plus[0]) // 2, cy), self.fmt(),
+               font=font, fill=FG, anchor='mm')
+
+    def tap(self, scr, x, y):
+        try:
+            if _hit(self._minus, x, y):
+                self.dec()
+                return 'rerender'
+            if _hit(self._plus, x, y):
+                self.inc()
+                return 'rerender'
+        except Exception as e:
+            logger.warning('stepper %s failed: %s', self.key, e)
+        return None
+
+
+class Slider(Widget):
+    """Label + draggable/ tappable track, 0..100. get()->int, set(int) applies."""
+
+    weight = 1.5
+
+    def __init__(self, key, label, get, set_, lo=0, hi=100):
+        super().__init__(key)
+        self.label = label
+        self.get = get
+        self.set_ = set_
+        self.lo, self.hi = lo, hi
+        self._track = None
+
+    def render(self, scr, d, canvas, font):
+        x0, y0, x1, y1 = self.rect
+        d.rounded_rectangle(self.rect, radius=12, fill=ROW)
+        pad = int((y1 - y0) * 0.24)
+        val = max(self.lo, min(self.hi, int(self.get())))
+        d.text((x0 + pad, y0 + pad), self.label, font=font, fill=FG, anchor='lm')
+        d.text((x1 - pad, y0 + pad), '%d%%' % val, font=font, fill=MUTED,
+               anchor='rm')
+        tx0, tx1 = x0 + pad, x1 - pad
+        ty = y1 - pad - 4
+        self._track = (tx0, ty - 14, tx1, ty + 14)
+        d.rounded_rectangle((tx0, ty - 6, tx1, ty + 6), radius=6, fill=(70, 78, 90))
+        frac = (val - self.lo) / float(self.hi - self.lo or 1)
+        kx = int(tx0 + frac * (tx1 - tx0))
+        d.rounded_rectangle((tx0, ty - 6, kx, ty + 6), radius=6, fill=ACCENT)
+        d.ellipse((kx - 15, ty - 15, kx + 15, ty + 15), fill=(255, 255, 255))
+
+    def tap(self, scr, x, y):
+        if not self._track:
+            return None
+        tx0, _, tx1, _ = self._track
+        frac = max(0.0, min(1.0, (x - tx0) / float(tx1 - tx0 or 1)))
+        try:
+            self.set_(int(round(self.lo + frac * (self.hi - self.lo))))
+        except Exception as e:
+            logger.warning('slider %s failed: %s', self.key, e)
+        return 'rerender'
+
+
+class Days(Widget):
+    """7 weekday toggles (Mo..So). get()->set of JS-getDay ints (0=Sun..6=Sat),
+    set(list) persists. Rendered Mon-first for humans, mapped back on tap."""
+
+    weight = 1.1
+    _LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+    _JS = [1, 2, 3, 4, 5, 6, 0]   # column i -> JS getDay value
+
+    def __init__(self, key, get, set_):
+        super().__init__(key)
+        self.get = get
+        self.set_ = set_
+        self._cells = []
+
+    def render(self, scr, d, canvas, font):
+        x0, y0, x1, y1 = self.rect
+        active = set(self.get() or [])
+        n = 7
+        gap = 8
+        cw = (x1 - x0 - gap * (n - 1)) // n
+        self._cells = []
+        sfont = canvas.font(max(14, (y1 - y0) // 3))
+        for i in range(n):
+            cx0 = x0 + i * (cw + gap)
+            rect = (cx0, y0, cx0 + cw, y1)
+            self._cells.append(rect)
+            on = self._JS[i] in active
+            d.rounded_rectangle(rect, radius=10, fill=ACCENT if on else ROW)
+            d.text(((cx0 + cx0 + cw) // 2, (y0 + y1) // 2), self._LABELS[i],
+                   font=sfont, fill=ACCENT_FG if on else MUTED, anchor='mm')
+
+    def tap(self, scr, x, y):
+        for i, rect in enumerate(self._cells):
+            if _hit(rect, x, y):
+                active = set(self.get() or [])
+                js = self._JS[i]
+                active.discard(js) if js in active else active.add(js)
+                try:
+                    self.set_(sorted(active))
+                except Exception as e:
+                    logger.warning('days set failed: %s', e)
+                return 'rerender'
+        return None
+
+
+class InfoBlock(Widget):
+    """A non-interactive multi-line text block. lines() -> list[str]."""
+
+    def __init__(self, key, lines, weight=2.2):
+        super().__init__(key)
+        self.lines = lines
+        self.weight = weight
+
+    def render(self, scr, d, canvas, font):
+        x0, y0, x1, y1 = self.rect
+        lines = self.lines() if callable(self.lines) else (self.lines or [])
+        n = max(1, len(lines))
+        lh = min(44, (y1 - y0) // n)               # cap line height (no spreading)
+        sfont = canvas.font(max(16, int(lh * 0.6)))
+        ly = y0 + lh // 2
+        for ln in lines:
+            d.text((x0 + 6, int(ly)), ln, font=sfont, fill=MUTED, anchor='lm')
+            ly += lh
+
+
+class QRBlock(Widget):
+    """A QR code (from the server's /api/qrcode matrix) + a caption."""
+
+    weight = 3.2
+
+    def __init__(self, key, modules, caption=''):
+        super().__init__(key)
+        self.modules = modules      # list[list[int]] or None
+        self.caption = caption
+
+    def render(self, scr, d, canvas, font):
+        x0, y0, x1, y1 = self.rect
+        cap_h = int((y1 - y0) * 0.16)
+        area = min(x1 - x0, (y1 - y0) - cap_h)
+        mods = self.modules
+        if mods:
+            n = len(mods)
+            quiet = 2
+            cell = area // (n + 2 * quiet)
+            side = cell * (n + 2 * quiet)
+            ox = x0 + ((x1 - x0) - side) // 2
+            oy = y0
+            d.rectangle((ox, oy, ox + side, oy + side), fill=(255, 255, 255))
+            for r, row in enumerate(mods):
+                for c, v in enumerate(row):
+                    if v:
+                        cx = ox + (c + quiet) * cell
+                        cy = oy + (r + quiet) * cell
+                        d.rectangle((cx, cy, cx + cell, cy + cell), fill=(0, 0, 0))
+        else:
+            d.text(((x0 + x1) // 2, y0 + area // 2), 'QR …', font=font,
+                   fill=MUTED, anchor='mm')
+        if self.caption:
+            d.text(((x0 + x1) // 2, y1 - cap_h // 2), self.caption, font=font,
+                   fill=MUTED, anchor='mm')
 
 
 class Screen:
-    """A list-style screen: title + stacked buttons. Subclasses add behaviour."""
+    """A card holding a vertical stack of widgets. Subclasses supply widgets()."""
 
-    title = 'Menu'
+    title = 'Menü'
+    close_rect = None
 
     def __init__(self, ui):
         self.ui = ui
-        self.buttons = []
+        self._widgets = []
 
-    def build(self):
-        """Override to populate self.buttons for the current canvas size."""
+    def widgets(self):
+        """Override: return the list of Widgets for this screen."""
         return []
 
+    def back_row(self, label='Zurück'):
+        return Row('back', label, target=lambda: RootMenu(self.ui), kind='back')
+
+    def act(self, path, body=None, result='close'):
+        """A row handler that POSTs to an endpoint and then closes (or rerenders)."""
+        def fn():
+            self.ui.api_post(path, body)
+            return result
+        return fn
+
     def render(self, canvas):
-        self.buttons = self.build()
+        self._widgets = self.widgets()
         canvas.clear(BG)
-        # mimir logo, top-left of the SCREEN (outside the card).
         canvas.paste_logo(x=48, y=40, width=150)
         px0, py0, px1, py1 = self.ui.panel_rect()
         pw, ph = px1 - px0, py1 - py0
         d = canvas.draw()
-        # The modal card.
         d.rounded_rectangle((px0, py0, px1, py1), radius=24, fill=CARD)
-        # Small screen title, top-centre of the card.
-        title_font = canvas.font(max(18, ph // 22))
-        d.text(((px0 + px1) // 2, py0 + int(ph * 0.10)), self.title,
-               font=title_font, fill=MUTED, anchor='mm')
-        # Close "x", top-right of the card (always closes the whole menu).
-        cs = max(44, int(ph * 0.07))
-        cx1, cy0 = px1 - int(pw * 0.04), py0 + int(ph * 0.03)
+        title_font = canvas.font(max(20, ph // 24))
+        d.text((px0 + int(pw * 0.06), py0 + int(ph * 0.065)), self.title,
+               font=title_font, fill=FG, anchor='lm')
+        # Close button, top-right of the card (X drawn, not a glyph).
+        cs = max(40, int(ph * 0.06))
+        cx1 = px1 - int(pw * 0.05)
+        cy0 = py0 + int(ph * 0.035)
         self.close_rect = (cx1 - cs, cy0, cx1, cy0 + cs)
         d.ellipse(self.close_rect, fill=ROW)
-        x_font = canvas.font(int(cs * 0.56))
-        d.text(((self.close_rect[0] + self.close_rect[2]) // 2,
-                (self.close_rect[1] + self.close_rect[3]) // 2 - 1),
-               '×', font=x_font, fill=FG, anchor='mm')
-        label_font = canvas.font(max(16, ph // 26))
-        for b in self.buttons:
-            x0, y0, x1, y1 = b.rect
-            fill = ACCENT if b.kind == 'primary' else ROW
-            tcol = ACCENT_FG if b.kind == 'primary' else FG
-            if b.kind == 'danger':
-                fill, tcol = DANGER, ACCENT_FG
-            if b.kind == 'back':
-                fill, tcol = CARD, MUTED
-            d.rounded_rectangle(b.rect, radius=12, fill=fill)
-            d.text(((x0 + x1) // 2, (y0 + y1) // 2), b.label, font=label_font,
-                   fill=tcol, anchor='mm')
-        canvas.flush()
-
-    close_rect = None
-
-    def on_tap(self, x, y):
-        if self.close_rect:
-            cx0, cy0, cx1, cy1 = self.close_rect
-            if cx0 <= x <= cx1 and cy0 <= y <= cy1:
-                return 'close'
-        for b in self.buttons:
-            if b.hit(x, y):
-                return self.handle(b.key)
-        return None
-
-    def handle(self, key):
-        """Return a Screen to navigate to, 'close' to exit, or None to stay."""
-        return None
-
-    def _rows(self, keys_labels, kinds=None):
-        """Lay out the buttons to fill the lower part of the modal card."""
-        kinds = kinds or {}
-        px0, py0, px1, py1 = self.ui.panel_rect()
-        pw, ph = px1 - px0, py1 - py0
-        pad = int(pw * 0.08)
-        n = len(keys_labels)
+        m = int(cs * 0.3)
+        d.line((cx1 - cs + m, cy0 + m, cx1 - m, cy0 + cs - m), fill=FG, width=3)
+        d.line((cx1 - cs + m, cy0 + cs - m, cx1 - m, cy0 + m), fill=FG, width=3)
+        # Lay widgets out at their natural heights, vertically centred in the
+        # card (so a screen with few rows doesn't stretch into huge bars).
+        pad = int(pw * 0.06)
         x0 = px0 + pad
         col_w = pw - 2 * pad
-        top = py0 + int(ph * 0.18)              # below the title (logo is outside)
+        top = py0 + int(ph * 0.14)
         bottom = py1 - pad
-        gap = max(10, int(ph * 0.025))
-        row_h = max(44, (bottom - top - gap * (n - 1)) // max(1, n))
-        out = []
-        for i, (key, label) in enumerate(keys_labels):
-            y0 = top + i * (row_h + gap)
-            out.append(Button(key, label, (x0, y0, x0 + col_w, y0 + row_h),
-                              kind=kinds.get(key, 'row')))
-        return out
+        gap = max(10, int(ph * 0.02))
+        n = len(self._widgets)
+        base = int(ph * 0.095)
+        pref = [max(0.4, w.weight) * base for w in self._widgets]
+        total = sum(pref) + gap * (n - 1)
+        avail = bottom - top
+        if total > avail and total > 0:            # too many rows -> shrink
+            scale = avail / float(total)
+            pref = [p * scale for p in pref]
+            gap = int(gap * scale)
+            y = top
+        else:                                      # room to spare -> centre
+            y = top + (avail - total) / 2.0
+        row_font = canvas.font(max(17, ph // 28))
+        for w, h in zip(self._widgets, pref):
+            w.rect = (x0, int(y), x0 + col_w, int(y + h))
+            w.render(self, d, canvas, row_font)
+            y += h + gap
+        canvas.flush()
+
+    def on_tap(self, x, y):
+        if _hit(self.close_rect, x, y):
+            return 'close'
+        for w in self._widgets:
+            if w.hit(x, y):
+                return w.tap(self, x, y)
+        return None
+
+
+def _shift_time(hhmm, mins):
+    """Shift a 'HH:MM' string by `mins`, wrapping at 24h."""
+    try:
+        h, m = (int(x) for x in str(hhmm).split(':'))
+    except Exception:
+        h, m = 22, 0
+    total = (h * 60 + m + mins) % (24 * 60)
+    return '%02d:%02d' % (total // 60, total % 60)
+
+
+def _q(text):
+    import urllib.parse
+    return urllib.parse.quote(str(text), safe='')
 
 
 class RootMenu(Screen):
     title = 'Einstellungen'
 
-    def build(self):
-        return self._rows([
-            ('wifi', 'WLAN'),
-            ('brightness', 'Helligkeit'),
-            ('sleep', 'Jetzt schlafen'),
-            ('power', 'Ausschalten'),
-            ('info', 'Info'),
-        ])
-
-    def handle(self, key):
-        if key == 'wifi':
-            return WifiScreen(self.ui)
-        if key == 'info':
-            return InfoScreen(self.ui)
-        if key == 'power':
-            return PowerScreen(self.ui)
-        if key == 'sleep':
-            self.ui.action('sleep')
-            return 'close'
-        # 'brightness' -> a +/- screen (to be added)
-        return None
-
-
-class PowerScreen(Screen):
-    title = 'Ausschalten?'
-
-    def build(self):
-        return self._rows([
-            ('shutdown', 'Ausschalten'),
-            ('reboot', 'Neustart'),
-            ('back', 'Abbrechen'),
-        ], kinds={'shutdown': 'danger', 'back': 'back'})
-
-    def handle(self, key):
-        if key == 'back':
-            return RootMenu(self.ui)
-        if key in ('shutdown', 'reboot'):
-            self.ui.action(key)
-            return 'close'
-        return None
+    def widgets(self):
+        return [
+            Row('wifi', 'WLAN', target=lambda: WifiScreen(self.ui)),
+            Row('display', 'Anzeige', target=lambda: DisplayScreen(self.ui)),
+            Row('sleep', 'Schlaf', target=lambda: SleepScreen(self.ui)),
+            Row('slideshow', 'Slideshow', target=lambda: SlideshowScreen(self.ui)),
+            Row('albums', 'Fotoalben', target=lambda: AlbumsScreen(self.ui)),
+            Row('system', 'System', target=lambda: SystemScreen(self.ui)),
+        ]
 
 
 class WifiScreen(Screen):
     title = 'WLAN'
 
-    def build(self):
-        nets = self.ui.wifi_networks()[:5] if self.ui else []
-        rows = [('net:%s' % n['ssid'], '%s  %s' % (n['ssid'], n.get('signal', '')))
-                for n in nets]
-        rows.append(('back', 'Zurück'))
-        kinds = {'back': 'back'}
-        return self._rows(rows, kinds)
-
-    def handle(self, key):
-        if key == 'back':
-            return RootMenu(self.ui)
-        if key.startswith('net:'):
-            # -> password entry (on-screen keyboard) then connect(ssid, pw)
-            return None
-        return None
+    def widgets(self):
+        st = self.ui.api_get('/api/wifi/status') or {}
+        connected = bool(st.get('ssid'))
+        lines = [
+            'Status: ' + ('verbunden' if connected else 'nicht verbunden'),
+            'Netz: ' + (st.get('ssid') or '—'),
+            'IP: ' + (st.get('ip') or '—'),
+        ]
+        return [
+            InfoBlock('st', lines, weight=2.0),
+            Row('change', 'Am Handy ändern', target=lambda: QRScreen(self.ui, '/setup')),
+            self.back_row(),
+        ]
 
 
-class InfoScreen(Screen):
-    title = 'Info'
+class DisplayScreen(Screen):
+    title = 'Anzeige'
+    state = None
 
-    def build(self):
-        return self._rows([('back', 'Zurück')], kinds={'back': 'back'})
+    def widgets(self):
+        if self.state is None:
+            fs = self.ui.api_get('/api/frame/settings') or {}
+            es = fs.get('energy_save', {}) or {}
+            self.state = {
+                'brightness': int(es.get('brightness', 80) or 80),
+                'orientation': (fs.get('frame', {}) or {}).get('orientation', 'horizontal'),
+            }
 
-    def render(self, canvas):
-        super().render(canvas)
-        d = canvas.draw()
-        f = canvas.font(max(20, canvas.h // 34))
-        lines = self.ui.info_lines() if self.ui else []
-        y = int(canvas.h * 0.22)
-        for ln in lines:
-            d.text((int(canvas.w * 0.12), y), ln, font=f, fill=MUTED)
-            y += int(canvas.h * 0.05)
+        def set_bright(v):
+            self.state['brightness'] = v
+            self.ui.api_post('/brightness', {'value': v})
 
-    def handle(self, key):
-        return RootMenu(self.ui) if key == 'back' else None
+        def toggle_orient():
+            self.state['orientation'] = ('vertical'
+                if self.state['orientation'] == 'horizontal' else 'horizontal')
+            self.ui.api_post('/orientation', {'orientation': self.state['orientation']})
+            return 'rerender'
+
+        return [
+            Slider('bright', 'Helligkeit', lambda: self.state['brightness'], set_bright),
+            Row('orient', 'Ausrichtung', on_tap=toggle_orient,
+                value=('Hochkant' if self.state['orientation'] == 'vertical' else 'Quer')),
+            self.back_row(),
+        ]
+
+
+class SleepScreen(Screen):
+    title = 'Schlaf'
+    state = None
+
+    def widgets(self):
+        if self.state is None:
+            s = self.ui.api_get('/schedule') or {}
+            self.state = {
+                'enabled': bool(s.get('enabled', False)),
+                'off_time': s.get('off_time', '22:00'),
+                'on_time': s.get('on_time', '07:00'),
+                'weekdays': s.get('weekdays', [0, 1, 2, 3, 4, 5, 6]),
+            }
+
+        def push():
+            self.ui.api_post('/schedule', {k: self.state[k]
+                             for k in ('enabled', 'off_time', 'on_time', 'weekdays')})
+
+        def set_enabled(v):
+            self.state['enabled'] = v
+            push()
+
+        def shift(key, mins):
+            self.state[key] = _shift_time(self.state[key], mins)
+            push()
+
+        def set_days(lst):
+            self.state['weekdays'] = lst
+            push()
+
+        return [
+            Toggle('en', 'Schlafmodus', lambda: self.state['enabled'], set_enabled),
+            Stepper('off', 'Aus um', lambda: self.state['off_time'],
+                    lambda: shift('off_time', -30), lambda: shift('off_time', 30)),
+            Stepper('on', 'Ein um', lambda: self.state['on_time'],
+                    lambda: shift('on_time', -30), lambda: shift('on_time', 30)),
+            Days('days', lambda: self.state['weekdays'], set_days),
+            Row('method', 'Methode & Test', target=lambda: MethodScreen(self.ui)),
+            Row('now', 'Jetzt schlafen', on_tap=self.act('/sleep'), kind='primary'),
+            self.back_row(),
+        ]
+
+
+class MethodScreen(Screen):
+    title = 'Schlaf-Methode'
+    _METHODS = ['ddcci', 'hdmi', 'dpms', 'brightness', 'black_only']
+    _NAMES = {'ddcci': 'DDC/CI', 'hdmi': 'HDMI aus', 'dpms': 'DPMS',
+              'brightness': 'Helligkeit 0', 'black_only': 'Nur schwarz'}
+    state = None
+
+    def widgets(self):
+        if self.state is None:
+            fs = self.ui.api_get('/api/frame/settings') or {}
+            self.state = {'method': fs.get('sleep_method', 'ddcci')}
+
+        def cycle():
+            m = self.state['method']
+            i = self._METHODS.index(m) if m in self._METHODS else 0
+            self.state['method'] = self._METHODS[(i + 1) % len(self._METHODS)]
+            self.ui.api_post('/api/frame/settings', {'sleep_method': self.state['method']})
+            return 'rerender'
+
+        return [
+            Row('m', 'Methode', on_tap=cycle, value=self._NAMES.get(self.state['method'])),
+            Row('test', 'Testen (8s)',
+                on_tap=self.act('/api/sleep/test', {'method': self.state['method']}),
+                kind='primary'),
+            Row('sleepnow', 'Jetzt schlafen', on_tap=self.act('/sleep')),
+            Row('wakenow', 'Jetzt wecken', on_tap=self.act('/wake')),
+            self.back_row(),
+        ]
+
+
+class SlideshowScreen(Screen):
+    title = 'Slideshow'
+    state = None
+
+    def widgets(self):
+        if self.state is None:
+            fs = self.ui.api_get('/api/frame/settings') or {}
+            iv = (fs.get('slideshow', {}) or {}).get('interval', 10)
+            self.state = {'interval': int(iv or 10)}
+
+        def shift(delta):
+            self.state['interval'] = max(10, min(3600, self.state['interval'] + delta))
+            self.ui.api_post('/api/interval', {'interval': self.state['interval']})
+
+        st = self.ui.api_get('/sync/status') or {}
+        running = st.get('running')
+        return [
+            Stepper('iv', 'Intervall', lambda: '%ds' % self.state['interval'],
+                    lambda: shift(-5), lambda: shift(5)),
+            Row('sync', 'Jetzt synchronisieren',
+                on_tap=self.act('/sync/trigger', result='rerender'),
+                value=('läuft …' if running else None), kind='primary'),
+            self.back_row(),
+        ]
+
+
+class AlbumsScreen(Screen):
+    title = 'Fotoalben'
+
+    def widgets(self):
+        data = self.ui.api_get('/api/album_names') or {}
+        names = [n for src in data.values() if isinstance(src, dict)
+                 for n in src.values()]
+        lines = ['Alben:'] + (['• ' + n for n in names[:5]]
+                              or ['(keine konfiguriert)'])
+        return [
+            InfoBlock('names', lines, weight=2.6),
+            Row('edit', 'Quellen am Handy bearbeiten',
+                target=lambda: QRScreen(self.ui, '/remote')),
+            self.back_row(),
+        ]
+
+
+class SystemScreen(Screen):
+    title = 'System'
+
+    def widgets(self):
+        si = self.ui.api_get('/sysinfo') or {}
+        ver = self.ui.api_get('/api/version') or {}
+        ips = si.get('ips', []) or []
+        lines = [
+            'IP: ' + (ips[0] if ips else '—'),
+            'Version: %s (%s)' % (ver.get('version', '?'), ver.get('date', '')),
+            'Temp: %s °C   Disk: %s' % (si.get('cpu_temp', '?'), si.get('disk', '?')),
+            'Fotos H/V: %s   Videos H/V: %s' % (si.get('photo_count', '?'),
+                                               si.get('video_count', '?')),
+        ]
+        return [
+            InfoBlock('si', lines, weight=2.6),
+            Row('access', 'Zugang / QR', target=lambda: QRScreen(self.ui, '/remote')),
+            Row('power', 'Aus / Neustart', target=lambda: PowerScreen(self.ui),
+                kind='danger'),
+            self.back_row(),
+        ]
+
+
+class PowerScreen(Screen):
+    title = 'Aus / Neustart'
+
+    def widgets(self):
+        return [
+            Row('shutdown', 'Ausschalten', on_tap=self.act('/shutdown'), kind='danger'),
+            Row('reboot', 'Neustart', on_tap=self.act('/reboot')),
+            Row('back', 'Abbrechen', target=lambda: RootMenu(self.ui), kind='back'),
+        ]
+
+
+class QRScreen(Screen):
+    title = 'Mit dem Handy'
+
+    def __init__(self, ui, path):
+        super().__init__(ui)
+        self.path = path
+        self._mods = None
+        self._url = None
+
+    def widgets(self):
+        if self._mods is None:
+            acc = self.ui.api_get('/api/access') or {}
+            token = acc.get('token', '')
+            ips = acc.get('ips', []) or []
+            ip = ips[0] if ips else 'mimir.local'
+            sep = '&' if '?' in self.path else '?'
+            self._url = 'http://%s:8080%s%stoken=%s' % (ip, self.path, sep, token)
+            qr = self.ui.api_get('/api/qrcode?text=' + _q(self._url)) or {}
+            self._mods = qr.get('modules')
+        return [
+            QRBlock('qr', self._mods, caption=self._url.replace('http://', '')),
+            self.back_row(),
+        ]
 
 
 class NativeUI:
     """Owns the canvas + current screen; driven by taps from a TouchReader.
 
-    Hooks (set by the host, e.g. the slideshow daemon):
-      * wifi_networks() -> [{'ssid','signal','security'}]  (WiFiManager.scan)
-      * action(name)    -> perform 'sleep' etc.
-      * info_lines()    -> list[str] for the Info screen
+    Screens talk to the running server (frame/routes.py) over localhost:8080 via
+    api_get/api_post — the same HTTP API the phone web UI uses, which is open to
+    localhost — rather than reaching into the app object (the slideshow runs in a
+    separate process). `hooks` is accepted for backward-compatibility but the
+    screens use the API directly.
     """
 
-    def __init__(self, hooks=None, orientation='horizontal'):
+    def __init__(self, hooks=None, orientation='horizontal',
+                 api_base='http://localhost:8080'):
         self.canvas = FbCanvas()
         self.hooks = hooks or {}
         self.orientation = orientation
+        self.api_base = api_base
         self.screen = None
 
     def panel_rect(self):
-        """The centred modal panel the menu lives in, sized by orientation.
-
-        Horizontal (landscape panel): 1/3 width x 2/3 height — a portrait card.
-        Vertical: 2/3 width x 1/3 height ("andersrum"). NOTE: true vertical
-        mounting also needs the canvas + touch rotated 90 deg; that is handled
-        where the frame is actually portrait (TODO), this only sizes the panel.
-        """
+        """The centred settings card, sized by orientation. Roomy enough for
+        sliders/steppers/day-pickers. NOTE: true vertical mounting also needs the
+        canvas + touch rotated 90 deg (TODO); this only sizes the card."""
         w, h = self.canvas.w, self.canvas.h
         if self.orientation == 'vertical':
-            pw, ph = int(w * 2 / 3), int(h / 3)
+            pw, ph = int(w * 0.82), int(h * 0.52)
         else:
-            pw, ph = int(w / 3), int(h * 2 / 3)
+            pw, ph = int(w * 0.44), int(h * 0.82)
         x0, y0 = (w - pw) // 2, (h - ph) // 2
         return x0, y0, x0 + pw, y0 + ph
 
-    # hook helpers
-    def wifi_networks(self):
-        fn = self.hooks.get('wifi_networks')
+    # --- server API (localhost) ---
+    def api_get(self, path):
+        import json
+        import urllib.request
         try:
-            return fn() if fn else []
+            with urllib.request.urlopen(self.api_base + path, timeout=3) as r:
+                return json.loads(r.read().decode('utf-8'))
         except Exception as e:
-            logger.warning('wifi_networks hook failed: %s', e)
-            return []
+            logger.warning('api_get %s failed: %s', path, e)
+            return None
 
-    def action(self, name):
-        fn = self.hooks.get('action')
-        if fn:
-            fn(name)
-
-    def info_lines(self):
-        fn = self.hooks.get('info_lines')
-        return fn() if fn else []
+    def api_post(self, path, obj=None):
+        import json
+        import urllib.request
+        try:
+            data = json.dumps(obj).encode('utf-8') if obj is not None else b''
+            req = urllib.request.Request(
+                self.api_base + path, data=data, method='POST',
+                headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                body = r.read().decode('utf-8')
+                return json.loads(body) if body else {}
+        except Exception as e:
+            logger.warning('api_post %s failed: %s', path, e)
+            return None
 
     def open(self):
         self.screen = RootMenu(self)
@@ -376,6 +826,9 @@ class NativeUI:
         if nxt == 'close':
             self.screen = None
             return False
+        if nxt == 'rerender':
+            self.screen.render(self.canvas)
+            return True
         if isinstance(nxt, Screen):
             self.screen = nxt
             self.screen.render(self.canvas)
