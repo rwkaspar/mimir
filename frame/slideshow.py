@@ -473,14 +473,16 @@ class NativeSlideshow:
             self._hold_bg = None       # the menu is about to take the framebuffer
             on_hot_corner()
 
-        # Portrait mounting: the UI is composed in LOGICAL portrait coords
-        # (panel turned 90°), so touch maps raw -> logical (swapped dims) with a
-        # swap + flip. The exact flip is the physical turn direction; calibrate
-        # against the live panel if taps land mirrored.
+        # Portrait mounting: the UI is composed in LOGICAL portrait coords and
+        # rotated 90° CCW (PIL rotate(90) / ffmpeg transpose=2) into the native
+        # landscape framebuffer. Touch therefore maps raw -> logical as the exact
+        # inverse of that render rotation: logical_x = 1 - raw_y_frac,
+        # logical_y = raw_x_frac  ==  swap + flip_x. Derived & confirmed from live
+        # raw capture (the visual hot corner read raw≈(0,0) = native top-left).
         orient = self._orientation()
         if orient == 'vertical':
             tw, th = self.fb_h, self.fb_w   # logical portrait (e.g. 1200x1920)
-            swap, flip_x, flip_y = True, False, True
+            swap, flip_x, flip_y = True, True, False
         else:
             tw, th = self.fb_w, self.fb_h
             swap, flip_x, flip_y = False, False, False
