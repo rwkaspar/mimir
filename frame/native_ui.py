@@ -456,6 +456,7 @@ class Screen:
     title = 'Menü'
     close_rect = None
     back_rect = None
+    hit_rect = None           # rect of the last-tapped control (for the bounce guard)
     show_back = True          # draw the fixed back button (root menu turns it off)
 
     def __init__(self, ui):
@@ -542,12 +543,16 @@ class Screen:
         canvas.flush()
 
     def on_tap(self, x, y):
+        self.hit_rect = None
         if _hit(self.close_rect, x, y):
+            self.hit_rect = self.close_rect
             return 'close'
         if _hit(self.back_rect, x, y):
+            self.hit_rect = self.back_rect
             return self.back_target()
         for w in self._widgets:
             if w.hit(x, y):
+                self.hit_rect = w.rect
                 return w.tap(self, x, y)
         return None
 
@@ -815,7 +820,6 @@ class NativeUI:
     screens use the API directly.
     """
 
-    _GUARD_S = 1.0        # s: ignore all taps this long after a navigation
 
     def __init__(self, hooks=None, orientation='horizontal',
                  api_base='http://localhost:8080'):
@@ -824,12 +828,14 @@ class NativeUI:
         self.orientation = orientation
         self.api_base = api_base
         self.screen = None
-        # Bounce guard: after a tap NAVIGATES to another screen, ALL taps are
-        # ignored for a moment, so a second (unintended) tap from the laggy panel
-        # can't land on whatever the new screen drew under the finger — no matter
-        # where that button sits. In-place rerenders (toggle/stepper/slider) are
-        # NOT guarded, so you can still re-tap them quickly.
-        self._guard_until = 0.0
+        # Bounce guard (timer-free): when a tap NAVIGATES, remember that button's
+        # rect; the FIRST tap on the new screen that lands in that same rect is
+        # swallowed. So a second, unintended tap at the spot you just pressed —
+        # the laggy-panel "tap again because nothing happened" — hits nothing,
+        # while any tap elsewhere works immediately. One-shot: it clears on the
+        # next tap regardless, so a control that genuinely sits there is reachable
+        # with a second deliberate tap.
+        self._swallow_rect = None
 
     def panel_rect(self):
         """The centred settings card, sized by orientation. Roomy enough for
@@ -893,10 +899,14 @@ class NativeUI:
         """Feed a screen-space tap; returns True while the menu stays open."""
         if self.screen is None:
             return False
-        now = time.time()
-        if now < self._guard_until:
-            return True            # ignore bounce taps right after a navigation
+        # Swallow exactly one bounce tap at the spot we just navigated from.
+        if self._swallow_rect is not None:
+            inside = _hit(self._swallow_rect, x, y)
+            self._swallow_rect = None
+            if inside:
+                return True
         nxt = self.screen.on_tap(x, y)
+        src_rect = self.screen.hit_rect
         if nxt == 'close':
             self.screen = None
             return False
@@ -906,9 +916,7 @@ class NativeUI:
         if isinstance(nxt, Screen):
             self.screen = nxt
             self.screen.render(self.canvas)
-            # Start the freeze once the new screen is actually on-panel (render can
-            # take a while on the Zero), so the full window covers the bounce.
-            self._guard_until = time.time() + self._GUARD_S
+            self._swallow_rect = src_rect     # dead-zone that spot on the new screen
         return True
 
 
