@@ -531,11 +531,22 @@ class NativeSlideshow:
         subprocess.run(['sudo', 'dd', f'if={raw_path}', 'of=/dev/fb0', 'bs=4M'],
                        capture_output=True, timeout=10)
 
+    def _hold_is_vertical(self):
+        return self._orientation() == 'vertical'
+
     def _build_hold_bg(self, from_raw):
         """A dimmed backdrop for the hold overlay: the current photo darkened,
-        or a dark panel when none is available (e.g. a hold over video)."""
+        or a dark panel when none is available (e.g. a hold over video).
+
+        Returned in LOGICAL orientation (portrait for a vertical mount): the
+        cached framebuffer is native landscape, so for vertical we rotate it
+        90° CW back to logical. _draw_hold composes the ring/caption on top in
+        logical space and rotates the whole thing 90° CCW before packing, so the
+        photo lands back in native orientation and the ring/text come out
+        upright on the turned panel — same pipeline as the menu and photos."""
         from PIL import Image, ImageEnhance
         import numpy as np
+        vert = self._hold_is_vertical()
         try:
             if from_raw and os.path.exists(from_raw):
                 data = open(from_raw, 'rb').read()
@@ -545,12 +556,15 @@ class NativeSlideshow:
                 g = ((a >> 5) & 0x3F) << 2
                 b = (a & 0x1F) << 3
                 rgb = np.dstack([r, g, b]).astype('uint8')
-                return ImageEnhance.Brightness(
+                im = ImageEnhance.Brightness(
                     Image.fromarray(rgb, 'RGB')).enhance(0.25)
+                if vert:
+                    im = im.rotate(-90, expand=True)   # native -> logical portrait
+                return im
         except Exception as e:
             logger.debug("hold backdrop from photo failed: %s", e)
-        from PIL import Image
-        return Image.new('RGB', (self.fb_w, self.fb_h), (16, 18, 22))
+        lw, lh = (self.fb_h, self.fb_w) if vert else (self.fb_w, self.fb_h)
+        return Image.new('RGB', (lw, lh), (16, 18, 22))
 
     def _draw_hold(self, frac):
         """Draw the centred progress ring + caption on the cached backdrop and
@@ -561,8 +575,9 @@ class NativeSlideshow:
             return
         im = self._hold_bg.copy()
         d = ImageDraw.Draw(im)
-        cx, cy = self.fb_w // 2, self.fb_h // 2
-        R = max(60, min(self.fb_w, self.fb_h) // 7)
+        lw, lh = im.size
+        cx, cy = lw // 2, lh // 2
+        R = max(60, min(lw, lh) // 7)
         th = max(12, R // 6)
         box = (cx - R, cy - R, cx + R, cy + R)
         d.arc(box, 0, 360, fill=(70, 78, 90), width=th)              # track
@@ -575,6 +590,8 @@ class NativeSlideshow:
                    fill=(214, 218, 224), font=f)
         except Exception:
             pass
+        if self._hold_is_vertical():
+            im = im.rotate(90, expand=True)   # logical portrait -> native landscape
         a = np.asarray(im, dtype=np.uint16)
         r, g, b = a[:, :, 0], a[:, :, 1], a[:, :, 2]
         packed = (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)).astype('<u2')
