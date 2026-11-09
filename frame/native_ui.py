@@ -56,10 +56,22 @@ def _fb_geometry():
 class FbCanvas:
     """A PIL drawing surface that flushes to /dev/fb0 as RGB565 (16bpp)."""
 
-    def __init__(self):
+    # Rotation applied to the composed image before it hits the panel, when the
+    # frame is mounted portrait (the Pi can't rotate the framebuffer in HW, so we
+    # rotate the pixels we own). 90 vs 270 is the physical turn direction.
+    VERTICAL_ROTATE = 90
+
+    def __init__(self, orientation='horizontal'):
         from PIL import Image
-        self.w, self.h, self.bpp = _fb_geometry()
+        self.pw, self.ph, self.bpp = _fb_geometry()   # physical panel (e.g. 1920x1200)
+        self.orientation = orientation
         self._Image = Image
+        # We draw in LOGICAL coordinates: portrait (swapped) when vertical, so the
+        # whole UI is composed upright, then rotated into the landscape fb.
+        if orientation == 'vertical':
+            self.w, self.h = self.ph, self.pw         # e.g. 1200x1920
+        else:
+            self.w, self.h = self.pw, self.ph
         self.img = Image.new('RGB', (self.w, self.h), (0, 0, 0))
 
     def draw(self):
@@ -103,7 +115,10 @@ class FbCanvas:
 
     def _to_rgb565(self):
         import numpy as np
-        a = np.asarray(self.img, dtype=np.uint16)  # HxWx3
+        img = self.img
+        if self.orientation == 'vertical':      # rotate logical portrait -> panel
+            img = img.rotate(self.VERTICAL_ROTATE, expand=True)
+        a = np.asarray(img, dtype=np.uint16)  # HxWx3
         r, g, b = a[:, :, 0], a[:, :, 1], a[:, :, 2]
         packed = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
         return packed.astype('<u2').tobytes()
@@ -646,13 +661,13 @@ class OrientationConfirmScreen(Screen):
         label = 'Hochkant' if self.target == 'vertical' else 'Quer'
         return [
             InfoBlock('warn', [
-                'Die Ausrichtung zu ändern',
-                'startet das Gerät neu.',
+                'Die Anzeige startet beim',
+                'Umstellen kurz neu.',
                 '',
-                'Jetzt neu starten und',
-                'auf %s umstellen?' % label,
+                'Jetzt auf %s' % label,
+                'umstellen?',
             ], weight=3.2),
-            Row('go', 'Ja, neu starten',
+            Row('go', 'Ja, umstellen',
                 on_tap=self.act('/api/orientation/rotate',
                                 {'orientation': self.target, 'degrees': 90},
                                 result='close'),
@@ -850,7 +865,7 @@ class NativeUI:
 
     def __init__(self, hooks=None, orientation='horizontal',
                  api_base='http://localhost:8080'):
-        self.canvas = FbCanvas()
+        self.canvas = FbCanvas(orientation=orientation)
         self.hooks = hooks or {}
         self.orientation = orientation
         self.api_base = api_base
@@ -868,9 +883,9 @@ class NativeUI:
         """The centred settings card, sized by orientation. Roomy enough for
         sliders/steppers/day-pickers. NOTE: true vertical mounting also needs the
         canvas + touch rotated 90 deg (TODO); this only sizes the card."""
-        w, h = self.canvas.w, self.canvas.h
+        w, h = self.canvas.w, self.canvas.h   # logical (portrait when vertical)
         if self.orientation == 'vertical':
-            pw, ph = int(w * 0.82), int(h * 0.52)
+            pw, ph = int(w * 0.86), int(h * 0.64)
         else:
             pw, ph = int(w * 0.44), int(h * 0.82)
         x0, y0 = (w - pw) // 2, (h - ph) // 2

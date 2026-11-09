@@ -1019,10 +1019,12 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.send_error(400, str(e))
 
     def handle_rotate_orientation(self):
-        """Change the physical mounting orientation: save it, apply the KMS
-        display rotation to the boot cmdline, and reboot (the on-panel menu asks
-        for confirmation first). A reboot is required because the rotation is a
-        kernel/KMS setting, not a runtime toggle."""
+        """Change the mounting orientation (content-rotation, no reboot): save it
+        and restart the display service, which re-renders photos + menu rotated
+        for the new orientation. The Pi's GPU can't rotate the framebuffer 90°
+        (vc4 HVS does only 0/180 on a linear fb), so the app rotates the content
+        itself. Video needs re-processing to the rotated form; that is triggered
+        separately by the sync when it sees the orientation changed."""
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length)
         try:
@@ -1030,7 +1032,6 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             new_orientation = data.get('orientation', 'horizontal')
             if new_orientation not in ('horizontal', 'vertical'):
                 raise ValueError('Invalid orientation')
-            degrees = str(int(data.get('degrees', 90)))
 
             with open(self.app.config_path) as f:
                 cfg = yaml.safe_load(f)
@@ -1041,17 +1042,13 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
 
             self._json_response({'ok': True})
 
-            repo_dir = Path(__file__).resolve().parent.parent
-            script = repo_dir / 'scripts' / 'set_display_rotation.sh'
-
-            def apply_and_reboot():
+            def restart_display():
                 time.sleep(1)
-                subprocess.run(['sudo', str(script), new_orientation, degrees],
-                               capture_output=True, timeout=20)
-                subprocess.run(['sudo', 'reboot'], capture_output=True, timeout=10)
-            threading.Thread(target=apply_and_reboot, daemon=True).start()
+                subprocess.run(['sudo', 'systemctl', 'restart', DISPLAY_SERVICE],
+                               capture_output=True, timeout=15)
+            threading.Thread(target=restart_display, daemon=True).start()
         except Exception as e:
-            logger.error(f"Error rotating orientation: {e}")
+            logger.error(f"Error changing orientation: {e}")
             self._json_response({'ok': False, 'error': str(e)}, 400)
 
     def handle_sync_trigger(self):

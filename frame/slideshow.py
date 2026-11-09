@@ -224,13 +224,22 @@ class NativeSlideshow:
     # --- rendering ---
 
     def _render_photo(self, src, dst_raw):
-        """Blur-fill composite -> RGB565 raw at panel size."""
-        W, H, box = self.fb_w, self.fb_h, self._blur_radius()
+        """Blur-fill composite -> RGB565 raw at panel size. In vertical mounting
+        we compose in LOGICAL portrait, then transpose 90° (CCW, matching the
+        menu's FbCanvas rotate) so the raw is already at the physical landscape
+        panel size — the Pi can't rotate the framebuffer, so we bake it in."""
+        box = self._blur_radius()
+        if self._orientation() == 'vertical':
+            W, H = self.fb_h, self.fb_w        # compose portrait (e.g. 1200x1920)
+            post = ',transpose=2'              # -> landscape, upright when turned
+        else:
+            W, H = self.fb_w, self.fb_h
+            post = ''
         vf = (
             f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,split=2[bg][fg];"
             f"[bg]scale={W}:{H}:force_original_aspect_ratio=increase,"
             f"crop={W}:{H},boxblur={box}:1,eq=brightness=-0.2[bg2];"
-            f"[bg2][fg]overlay=(W-w)/2:(H-h)/2,format={self._fb_pixfmt()}"
+            f"[bg2][fg]overlay=(W-w)/2:(H-h)/2{post},format={self._fb_pixfmt()}"
         )
         try:
             subprocess.run(
@@ -464,16 +473,21 @@ class NativeSlideshow:
             self._hold_bg = None       # the menu is about to take the framebuffer
             on_hot_corner()
 
-        # In vertical (rotate=90) mounting the panel is turned 90°, so the raw
-        # touch axes need swapping/flipping to match the rotated screen. Best
-        # guess for rotate=90; calibrate against the live panel if taps land off.
+        # Portrait mounting: the UI is composed in LOGICAL portrait coords
+        # (panel turned 90°), so touch maps raw -> logical (swapped dims) with a
+        # swap + flip. The exact flip is the physical turn direction; calibrate
+        # against the live panel if taps land mirrored.
         orient = self._orientation()
-        swap = (orient == 'vertical')
-        flip_y = (orient == 'vertical')
+        if orient == 'vertical':
+            tw, th = self.fb_h, self.fb_w   # logical portrait (e.g. 1200x1920)
+            swap, flip_x, flip_y = True, False, True
+        else:
+            tw, th = self.fb_w, self.fb_h
+            swap, flip_x, flip_y = False, False, False
         self._touch = native_ui.TouchReader(
-            self.fb_w, self.fb_h, on_tap=on_tap, on_hot_corner=on_hot_corner_fire,
+            tw, th, on_tap=on_tap, on_hot_corner=on_hot_corner_fire,
             on_hot_progress=self._on_hot_progress, on_hot_cancel=self._on_hot_cancel,
-            swap=swap, flip_y=flip_y)
+            swap=swap, flip_x=flip_x, flip_y=flip_y)
         threading.Thread(target=self._touch.run, daemon=True).start()
         logger.info("Touch menu armed (hot corner: hold top-right)")
 
