@@ -9,6 +9,8 @@ import time
 import socket
 from pathlib import Path
 
+from .services import DISPLAY_SERVICE
+
 logger = logging.getLogger(__name__)
 
 
@@ -114,8 +116,9 @@ class SysinfoCache:
 class EnergySaveManager:
     """Manages sleep schedule by stopping/starting the display service.
 
-    During sleep: stops cage+Chromium (frees RAM, screen shows black console).
-    On wake: restarts the display service.
+    During sleep: stops the native slideshow (frees RAM + the HW video decoder
+    so videos can transcode at full power, screen shows black console).
+    On wake: restarts the slideshow.
     Touch-to-wake: reads raw input events during sleep to detect touch/tap.
     """
 
@@ -272,8 +275,9 @@ class EnergySaveManager:
             if sleep and not self.sleeping:
                 self.sleeping = True
                 self._notify_state()  # reflect "off" in HA immediately
-                # Stop cage to free RAM (returns to Linux console/framebuffer)
-                subprocess.run(['sudo', 'systemctl', 'stop', 'photo_frame_cage'],
+                # Stop the slideshow to free RAM + the HW decoder and release the
+                # display (returns to Linux console/framebuffer).
+                subprocess.run(['sudo', 'systemctl', 'stop', DISPLAY_SERVICE],
                              capture_output=True, timeout=15)
                 time.sleep(1)
                 # Fill framebuffer with black — keeps HDMI signal active
@@ -313,8 +317,8 @@ class EnergySaveManager:
                     # A running video transcode blocks the sync in p.join() (up
                     # to 20 min), so the stop flag alone won't free RAM in time.
                     # Kill the transcode now, BEFORE the display comes back —
-                    # otherwise cog (WPE) and ffmpeg fight over the 512 MB and
-                    # the renderer crashes. Killing ffmpeg also unblocks the
+                    # otherwise the slideshow's HW decoder and ffmpeg fight over
+                    # the RAM. Killing ffmpeg also unblocks the
                     # sync worker so it can honour the stop. The partial video is
                     # redone on the next sleep.
                     subprocess.run(['pkill', '-9', '-f', 'ffmpeg'],
@@ -325,11 +329,11 @@ class EnergySaveManager:
                             break
                         time.sleep(1)
                     logger.info("Wake: stopped sync (killed any transcode)")
-                # Start cage first (Chromium needs time to render)
-                subprocess.run(['sudo', 'systemctl', 'start', 'photo_frame_cage'],
+                # Start the slideshow again (it grabs DRM master + decoder)
+                subprocess.run(['sudo', 'systemctl', 'start', DISPLAY_SERVICE],
                              capture_output=True, timeout=15)
-                # Wait for Chromium to render the slideshow before turning on display
-                time.sleep(5)
+                # Give it a moment to take the display before the backlight returns
+                time.sleep(3)
                 # Restore backlight via configured method
                 self._backlight_on()
                 self.sleeping = False
@@ -382,7 +386,7 @@ class EnergySaveManager:
             # Brief head start so the wizard's localStorage write (resume step)
             # is flushed to disk before cog is killed by stopping the kiosk.
             time.sleep(2)
-            subprocess.run(['sudo', 'systemctl', 'stop', 'photo_frame_cage'],
+            subprocess.run(['sudo', 'systemctl', 'stop', DISPLAY_SERVICE],
                            capture_output=True, timeout=15)
             time.sleep(1)
             subprocess.run(['sudo', 'dd', 'if=/dev/zero', 'of=/dev/fb0',
@@ -400,8 +404,8 @@ class EnergySaveManager:
                 self._backlight_on()
             except Exception:
                 pass
-            # Always bring the kiosk back, even if the method failed.
-            subprocess.run(['sudo', 'systemctl', 'start', 'photo_frame_cage'],
+            # Always bring the display back, even if the method failed.
+            subprocess.run(['sudo', 'systemctl', 'start', DISPLAY_SERVICE],
                            capture_output=True, timeout=15)
             self.method = saved
 

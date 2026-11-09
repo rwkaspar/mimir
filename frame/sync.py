@@ -17,6 +17,7 @@ from frame.database import PhotoDatabase
 from frame.processing import process_photo_in_subprocess
 from frame.video import transcode_video_in_subprocess
 from frame.hardware import transcode_profile
+from frame.services import DISPLAY_SERVICE
 
 logger = logging.getLogger(__name__)
 
@@ -497,15 +498,15 @@ class PhotoSyncer:
                         download_path.unlink(missing_ok=True)
                         db.mark_failed(item_id)
                         continue
-                    # Free RAM for ffmpeg by stopping Chromium kiosk during
-                    # the first video transcode; restored at end of sync.
+                    # Free RAM + the HW decoder by stopping the display service
+                    # during the first video transcode; restored at end of sync.
                     # Only for an inline low-memory transcode (see
-                    # stop_cage_needed); during sleep the kiosk is already off.
+                    # stop_cage_needed); during sleep the display is already off.
                     if stop_cage_needed and not cage_stopped_for_video:
                         try:
-                            logger.info("Stopping cage to free RAM for video transcoding")
+                            logger.info("Stopping display to free RAM for video transcoding")
                             subprocess.run(['sudo', 'systemctl', 'stop',
-                                            'photo_frame_cage'],
+                                            DISPLAY_SERVICE],
                                            timeout=15, check=False)
                             cage_stopped_for_video = True
                             time.sleep(2)  # let memory settle
@@ -577,14 +578,14 @@ class PhotoSyncer:
             if tmp_dir.exists():
                 shutil.rmtree(tmp_dir, ignore_errors=True)
             db.close()
-            # Restart cage if we stopped it for video transcoding
+            # Restart the display service if we stopped it for video transcoding
             if cage_stopped_for_video:
                 try:
-                    logger.info("Restarting cage after video transcoding")
-                    subprocess.run(['sudo', 'systemctl', 'start', 'photo_frame_cage'],
+                    logger.info("Restarting display after video transcoding")
+                    subprocess.run(['sudo', 'systemctl', 'start', DISPLAY_SERVICE],
                                    timeout=15, check=False)
                 except Exception as e:
-                    logger.warning(f"Failed to restart cage: {e}")
+                    logger.warning(f"Failed to restart display: {e}")
             with self._lock:
                 self._running = False
                 relaunch = self._restart_requested

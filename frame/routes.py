@@ -14,6 +14,7 @@ import yaml
 
 from frame.clients import (SynologyPhotosClient, GooglePhotosClient, ImmichClient,
                             ICloudSharedAlbumClient, NextcloudClient)
+from frame.services import DISPLAY_SERVICE
 
 logger = logging.getLogger(__name__)
 
@@ -995,9 +996,9 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
 
                 def apply_orientation():
                     time.sleep(1)
-                    subprocess.run(['sudo', 'systemctl', 'restart', 'photo_frame_cage'],
+                    subprocess.run(['sudo', 'systemctl', 'restart', DISPLAY_SERVICE],
                                  capture_output=True, timeout=15)
-                    logger.info(f"Orientation changed to {new_orientation}, restarted cage")
+                    logger.info(f"Orientation changed to {new_orientation}, restarted display")
                     # Re-skin the boot splash for the new orientation so it
                     # matches on the next boot/shutdown. Slow (rebuilds
                     # initramfs) but orientation changes are rare.
@@ -1341,9 +1342,9 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             if orientation != old_orientation:
                 def restart_cage():
                     time.sleep(1)
-                    subprocess.run(['sudo', 'systemctl', 'restart', 'photo_frame_cage'],
+                    subprocess.run(['sudo', 'systemctl', 'restart', DISPLAY_SERVICE],
                                  capture_output=True, timeout=15)
-                    logger.info(f"Orientation changed to {orientation}, restarted cage")
+                    logger.info(f"Orientation changed to {orientation}, restarted display")
                 threading.Thread(target=restart_cage, daemon=True).start()
         except Exception as e:
             logger.error(f"Error saving frame settings: {e}")
