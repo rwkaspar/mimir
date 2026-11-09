@@ -414,12 +414,19 @@ class NativeSlideshow:
         }
 
     def _menu_action(self, name):
-        if name == 'sleep':
-            try:
-                import urllib.request
-                urllib.request.urlopen('http://localhost:8080/sleep', timeout=5)
-            except Exception as e:
-                logger.warning("sleep action failed: %s", e)
+        # The server owns sleep/power (energy.py has touch-to-wake). These are
+        # POST endpoints on localhost:8080.
+        endpoint = {'sleep': '/sleep', 'wake': '/wake',
+                    'shutdown': '/shutdown', 'reboot': '/reboot'}.get(name)
+        if not endpoint:
+            return
+        try:
+            import urllib.request
+            req = urllib.request.Request('http://localhost:8080' + endpoint,
+                                         data=b'', method='POST')
+            urllib.request.urlopen(req, timeout=5)
+        except Exception as e:
+            logger.warning("action %s failed: %s", name, e)
 
     def _info_lines(self):
         import socket

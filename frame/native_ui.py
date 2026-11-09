@@ -26,6 +26,7 @@ it, so they can be built and eyeballed first.
 """
 import logging
 import os
+import re
 import struct
 import subprocess
 import threading
@@ -125,6 +126,7 @@ ACCENT = (64, 142, 232)
 ACCENT_FG = (255, 255, 255)
 ROW = (38, 43, 51)
 CARD = (26, 30, 36)
+DANGER = (184, 54, 54)
 
 
 class Button:
@@ -182,6 +184,8 @@ class Screen:
             x0, y0, x1, y1 = b.rect
             fill = ACCENT if b.kind == 'primary' else ROW
             tcol = ACCENT_FG if b.kind == 'primary' else FG
+            if b.kind == 'danger':
+                fill, tcol = DANGER, ACCENT_FG
             if b.kind == 'back':
                 fill, tcol = CARD, MUTED
             d.rounded_rectangle(b.rect, radius=12, fill=fill)
@@ -234,6 +238,7 @@ class RootMenu(Screen):
             ('wifi', 'WLAN'),
             ('brightness', 'Helligkeit'),
             ('sleep', 'Jetzt schlafen'),
+            ('power', 'Ausschalten'),
             ('info', 'Info'),
         ])
 
@@ -242,10 +247,31 @@ class RootMenu(Screen):
             return WifiScreen(self.ui)
         if key == 'info':
             return InfoScreen(self.ui)
+        if key == 'power':
+            return PowerScreen(self.ui)
         if key == 'sleep':
             self.ui.action('sleep')
             return 'close'
         # 'brightness' -> a +/- screen (to be added)
+        return None
+
+
+class PowerScreen(Screen):
+    title = 'Ausschalten?'
+
+    def build(self):
+        return self._rows([
+            ('shutdown', 'Ausschalten'),
+            ('reboot', 'Neustart'),
+            ('back', 'Abbrechen'),
+        ], kinds={'shutdown': 'danger', 'back': 'back'})
+
+    def handle(self, key):
+        if key == 'back':
+            return RootMenu(self.ui)
+        if key in ('shutdown', 'reboot'):
+            self.ui.action(key)
+            return 'close'
         return None
 
 
@@ -408,52 +434,93 @@ class TouchReader:
     def _in_hot_corner(self, x, y):
         return x >= self.w - HOT_CORNER_PX and y <= HOT_CORNER_PX
 
-    def run(self):
-        import select
+    def _find_node(self):
+        """Locate the touchscreen's event node. The USB panel re-enumerates on
+        the flaky over-current transient (its event number can change), so we
+        re-detect rather than trust a fixed path. Falls back to self.node."""
         try:
-            f = open(self.node, 'rb')
-        except Exception as e:
-            logger.error('TouchReader: cannot open %s: %s', self.node, e)
-            return
-        rx = ry = None
-        down = False
-        down_t = 0.0
-        hot_fired = False
+            with open('/proc/bus/input/devices') as fh:
+                blocks = fh.read().split('\n\n')
+        except Exception:
+            return self.node
+        for b in blocks:
+            if 'touchscreen' in b.lower():
+                m = re.search(r'Handlers=[^\n]*?(event\d+)', b)
+                if m:
+                    return '/dev/input/' + m.group(1)
+        return self.node
+
+    def run(self):
+        """Read touch events, self-healing across device re-enumeration."""
+        import select
         while not self._stop.is_set():
-            r, _, _ = select.select([f], [], [], 0.1)
-            now = time.time()
+            node = self._find_node()
             try:
-                if (down and not hot_fired and rx is not None
-                        and ry is not None):
-                    x, y = self._map(rx, ry)
-                    if (self._in_hot_corner(x, y)
-                            and (now - down_t) * 1000 >= HOLD_MS):
-                        hot_fired = True
-                        if self.on_hot_corner:
-                            self.on_hot_corner()
-                if not r:
-                    continue
-                data = f.read(_EV_SZ)
-                if not data or len(data) < _EV_SZ:
-                    continue
-                _s, _u, et, code, val = struct.unpack(_EV_FMT, data)
-                if et == EV_ABS and code == ABS_X:
-                    rx = val
-                elif et == EV_ABS and code == ABS_Y:
-                    ry = val
-                elif et == EV_KEY and code == BTN_TOUCH:
-                    if val == 1:
-                        down, down_t, hot_fired = True, now, False
-                    elif val == 0:
-                        if (down and not hot_fired and rx is not None
-                                and ry is not None):
-                            x, y = self._map(rx, ry)
-                            if (now - down_t) * 1000 < HOLD_MS and self.on_tap:
-                                self.on_tap(x, y)
-                        down = False
+                f = open(node, 'rb')
             except Exception as e:
-                logger.warning('TouchReader: event handling error: %s', e)
-        f.close()
+                logger.warning('TouchReader: cannot open %s (%s), retrying', node, e)
+                self._stop.wait(2)
+                continue
+            logger.info('TouchReader: reading %s', node)
+            rx = ry = None
+            down = False
+            down_t = 0.0
+            hot_fired = False
+            reopen = False
+            while not self._stop.is_set() and not reopen:
+                try:
+                    r, _, _ = select.select([f], [], [], 0.1)
+                except Exception:
+                    reopen = True
+                    break
+                now = time.time()
+                try:
+                    if (down and not hot_fired and rx is not None
+                            and ry is not None):
+                        x, y = self._map(rx, ry)
+                        if (self._in_hot_corner(x, y)
+                                and (now - down_t) * 1000 >= HOLD_MS):
+                            hot_fired = True
+                            if self.on_hot_corner:
+                                self.on_hot_corner()
+                    if not r:
+                        continue
+                    try:
+                        data = f.read(_EV_SZ)
+                    except OSError as e:
+                        logger.warning('TouchReader: %s read error (%s), reopening',
+                                       node, e)
+                        reopen = True
+                        break
+                    if not data or len(data) < _EV_SZ:
+                        # Device went away (EOF) — reopen (it may re-enumerate).
+                        logger.warning('TouchReader: %s closed, reopening', node)
+                        reopen = True
+                        break
+                    _s, _u, et, code, val = struct.unpack(_EV_FMT, data)
+                    if et == EV_ABS and code == ABS_X:
+                        rx = val
+                    elif et == EV_ABS and code == ABS_Y:
+                        ry = val
+                    elif et == EV_KEY and code == BTN_TOUCH:
+                        if val == 1:
+                            down, down_t, hot_fired = True, now, False
+                        elif val == 0:
+                            if (down and not hot_fired and rx is not None
+                                    and ry is not None):
+                                x, y = self._map(rx, ry)
+                                if ((now - down_t) * 1000 < HOLD_MS
+                                        and self.on_tap):
+                                    self.on_tap(x, y)
+                            down = False
+                except Exception as e:
+                    logger.warning('TouchReader: event handling error: %s', e)
+            try:
+                f.close()
+            except Exception:
+                pass
+            if not self._stop.is_set():
+                self._stop.wait(1)   # brief pause before reopen
 
 
 if __name__ == '__main__':
