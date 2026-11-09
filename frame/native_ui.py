@@ -435,20 +435,44 @@ class TouchReader:
         return x >= self.w - HOT_CORNER_PX and y <= HOT_CORNER_PX
 
     def _find_node(self):
-        """Locate the touchscreen's event node. The USB panel re-enumerates on
-        the flaky over-current transient (its event number can change), so we
-        re-detect rather than trust a fixed path. Falls back to self.node."""
+        """Locate the touchscreen's absolute-coordinate event node.
+
+        The USB panel re-enumerates on the flaky over-current transient (its
+        event number can change), so we re-detect rather than trust a fixed
+        path. This panel exposes TWO input nodes under the same name: the real
+        multitouch digitizer (INPUT_PROP_DIRECT, absolute X/Y + MT, no REL) and
+        a pointer/mouse-emulation node (PROP=0, REL axes, BTN_LEFT). We must
+        bind the digitizer — the mouse node would feed relative deltas and
+        BTN_LEFT instead of the ABS_X/Y + BTN_TOUCH this reader expects, so taps
+        would map wrong. Both blocks match the name and both carry a mouseN
+        handler, so we SCORE the candidates: +2 for PROP=INPUT_PROP_DIRECT
+        (0x02), +1 for having no relative axes. Highest score wins. Falls back
+        to self.node."""
         try:
             with open('/proc/bus/input/devices') as fh:
                 blocks = fh.read().split('\n\n')
         except Exception:
             return self.node
+        best, best_score = None, -1
         for b in blocks:
-            if 'touchscreen' in b.lower():
-                m = re.search(r'Handlers=[^\n]*?(event\d+)', b)
-                if m:
-                    return '/dev/input/' + m.group(1)
-        return self.node
+            if 'touchscreen' not in b.lower():
+                continue
+            m = re.search(r'Handlers=[^\n]*?(event\d+)', b)
+            if not m:
+                continue
+            score = 0
+            pm = re.search(r'PROP=([0-9a-fA-F]+)', b)
+            if pm:
+                try:
+                    if int(pm.group(1), 16) & 0x02:  # INPUT_PROP_DIRECT
+                        score += 2
+                except ValueError:
+                    pass
+            if not re.search(r'^B: REL=', b, re.M):   # a real touchscreen has no relative axes
+                score += 1
+            if score > best_score:
+                best, best_score = '/dev/input/' + m.group(1), score
+        return best or self.node
 
     def run(self):
         """Read touch events, self-healing across device re-enumeration."""
