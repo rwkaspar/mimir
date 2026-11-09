@@ -24,6 +24,8 @@ enumerated — it is a USB device prone to an over-current latch; see memory
 touch-display-overcurrent). The renderer and screen model below do not depend on
 it, so they can be built and eyeballed first.
 """
+import collections
+import functools
 import logging
 import os
 import re
@@ -101,8 +103,13 @@ class FbCanvas:
             self.img.paste(FbCanvas._logo, (x, y), FbCanvas._logo)
 
     @staticmethod
+    @functools.lru_cache(maxsize=48)
     def font(size):
-        """A scalable TrueType font, falling back to PIL's bitmap default."""
+        """A scalable TrueType font, falling back to PIL's bitmap default.
+
+        Cached by size: render() asks for several sizes per frame and each
+        ImageFont.truetype() load is ~10ms on the Zero, so re-parsing the font
+        file every tap added tens of ms of pure lag."""
         from PIL import ImageFont
         for path in ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
                      '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'):
@@ -115,13 +122,17 @@ class FbCanvas:
 
     def _to_rgb565(self):
         import numpy as np
-        img = self.img
-        if self.orientation == 'vertical':      # rotate logical portrait -> panel
-            img = img.rotate(self.VERTICAL_ROTATE, expand=True)
-        a = np.asarray(img, dtype=np.uint16)  # HxWx3
+        a = np.asarray(self.img, dtype=np.uint16)  # HxWx3
         r, g, b = a[:, :, 0], a[:, :, 1], a[:, :, 2]
-        packed = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-        return packed.astype('<u2').tobytes()
+        packed = (((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)).astype('<u2')
+        if self.orientation == 'vertical':
+            # Rotate the packed single-channel buffer (CCW 90) instead of the
+            # 3-channel RGB image with PIL — np.rot90(k=1) is bit-identical to
+            # Image.rotate(90, expand=True) but ~100ms cheaper per flush on the
+            # Zero (verified). k=3 == rotate(270) for the other turn direction.
+            k = 1 if self.VERTICAL_ROTATE == 90 else 3
+            packed = np.ascontiguousarray(np.rot90(packed, k=k))
+        return packed.tobytes()
 
     def flush(self, tmp='/tmp/native_ui.raw'):
         """Pack to RGB565 and write the framebuffer. The frame user is in the
@@ -635,7 +646,11 @@ class DisplayScreen(Screen):
 
         def set_bright(v):
             self.state['brightness'] = v
-            self.ui.api_post('/brightness', {'value': v})
+            # The server drives the panel via ddcutil setvcp (~200ms) — fire it
+            # off-thread so dragging the slider stays smooth.
+            threading.Thread(target=self.ui.api_post,
+                             args=('/brightness', {'value': v}),
+                             daemon=True).start()
 
         current = self.state['orientation']
         other = 'vertical' if current == 'horizontal' else 'horizontal'
@@ -878,6 +893,36 @@ class NativeUI:
         # next tap regardless, so a control that genuinely sits there is reachable
         # with a second deliberate tap.
         self._swallow_rect = None
+        # Render is ~130-280ms per frame on the Zero. If it runs on the touch
+        # thread, that thread can't read new events while it renders, so taps
+        # pile up in the evdev buffer and replay in a confusing burst ("I tapped
+        # three times and nothing, then it jumped"). So the touch thread only
+        # ENQUEUES taps (instant); the slideshow's menu loop drains the queue and
+        # renders on its own thread. One deque, guarded by a lock.
+        self._tap_q = collections.deque()
+        self._tap_lock = threading.Lock()
+
+    def enqueue_tap(self, x, y):
+        """Called from the touch thread: record a tap without rendering."""
+        with self._tap_lock:
+            self._tap_q.append((x, y))
+
+    def clear_taps(self):
+        with self._tap_lock:
+            self._tap_q.clear()
+
+    def process_pending(self):
+        """Called from the render/menu thread: apply queued taps (which render).
+        Returns True while the menu stays open, False once it closes."""
+        while True:
+            with self._tap_lock:
+                if not self._tap_q:
+                    break
+                x, y = self._tap_q.popleft()
+            if not self.tap(x, y):        # tap() renders + returns open-state
+                self.clear_taps()
+                return False
+        return self.screen is not None
 
     def panel_rect(self):
         """The centred settings card, sized by orientation. Roomy enough for

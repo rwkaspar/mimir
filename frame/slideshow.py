@@ -467,7 +467,10 @@ class NativeSlideshow:
         def on_tap(x, y):
             if self._ui is not None and self._ui.screen is not None:
                 self._menu_activity = time.time()
-                self._ui.tap(x, y)
+                # Don't render on the touch thread (a render would block event
+                # reads and swallow follow-up taps) — just enqueue; _open_menu
+                # drains and renders on its own thread.
+                self._ui.enqueue_tap(x, y)
 
         def on_hot_corner_fire():
             self._hold_bg = None       # the menu is about to take the framebuffer
@@ -652,6 +655,7 @@ class NativeSlideshow:
             self._ui = self._native_ui.NativeUI(
                 hooks=self._menu_hooks(), orientation=self._orientation())
         if self._ui.screen is None:
+            self._ui.clear_taps()           # drop any taps from before it opened
             self._ui.open()                 # renders the menu to fb0
         self._menu_activity = time.time()
         return True
@@ -662,14 +666,17 @@ class NativeSlideshow:
         self._hold_req.clear()
         if not self._prep_menu():
             return
-        # Block the slideshow while the menu is open; taps are handled by the
-        # TouchReader thread. Auto-close after inactivity so we never hang.
+        # Block the slideshow while the menu is open. The TouchReader thread only
+        # enqueues taps; we drain + render them HERE so a slow render never
+        # blocks event reads. Auto-close after inactivity so we never hang.
         while (self._ui.screen is not None and not self._stop.is_set()):
             if time.time() - self._menu_activity > 45:
                 logger.info("Settings menu: auto-close (idle)")
                 self._ui.screen = None
                 break
-            time.sleep(0.1)
+            if not self._ui.process_pending():   # renders queued taps on this thread
+                break
+            time.sleep(0.03)
         logger.info("Settings menu closed, resuming slideshow")
 
     # --- main loop ---
