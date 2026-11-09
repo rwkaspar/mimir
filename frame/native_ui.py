@@ -455,10 +455,16 @@ class Screen:
 
     title = 'Menü'
     close_rect = None
+    back_rect = None
+    show_back = True          # draw the fixed back button (root menu turns it off)
 
     def __init__(self, ui):
         self.ui = ui
         self._widgets = []
+
+    def back_target(self):
+        """Where the fixed back button goes. Default: the root menu."""
+        return RootMenu(self.ui)
 
     def widgets(self):
         """Override: return the list of Widgets for this screen."""
@@ -483,17 +489,31 @@ class Screen:
         d = canvas.draw()
         d.rounded_rectangle((px0, py0, px1, py1), radius=24, fill=CARD)
         title_font = canvas.font(max(20, ph // 24))
-        d.text((px0 + int(pw * 0.06), py0 + int(ph * 0.065)), self.title,
-               font=title_font, fill=FG, anchor='lm')
-        # Close button, top-right of the card (X drawn, not a glyph).
         cs = max(40, int(ph * 0.06))
+        hy = py0 + int(ph * 0.035)
+        hcy = hy + cs // 2
+        # Fixed back button, top-left (drawn '<'), on every screen but the root.
+        # It lives where no content row ever is, so a bounce tap after a laggy
+        # navigation lands here harmlessly instead of on a menu entry.
+        self.back_rect = None
+        tx = px0 + int(pw * 0.06)
+        if self.show_back:
+            bx0 = px0 + int(pw * 0.05)
+            self.back_rect = (bx0, hy, bx0 + cs, hy + cs)
+            d.ellipse(self.back_rect, fill=ROW)
+            s = int(cs * 0.2)
+            mcx = bx0 + cs // 2 + s // 2
+            d.line((mcx, hcy - s, mcx - s, hcy), fill=FG, width=3)
+            d.line((mcx - s, hcy, mcx, hcy + s), fill=FG, width=3)
+            tx = bx0 + cs + int(pw * 0.03)
+        d.text((tx, hcy), self.title, font=title_font, fill=FG, anchor='lm')
+        # Close button, top-right of the card (X drawn, not a glyph).
         cx1 = px1 - int(pw * 0.05)
-        cy0 = py0 + int(ph * 0.035)
-        self.close_rect = (cx1 - cs, cy0, cx1, cy0 + cs)
+        self.close_rect = (cx1 - cs, hy, cx1, hy + cs)
         d.ellipse(self.close_rect, fill=ROW)
         m = int(cs * 0.3)
-        d.line((cx1 - cs + m, cy0 + m, cx1 - m, cy0 + cs - m), fill=FG, width=3)
-        d.line((cx1 - cs + m, cy0 + cs - m, cx1 - m, cy0 + m), fill=FG, width=3)
+        d.line((cx1 - cs + m, hy + m, cx1 - m, hy + cs - m), fill=FG, width=3)
+        d.line((cx1 - cs + m, hy + cs - m, cx1 - m, hy + m), fill=FG, width=3)
         # Lay widgets out at their natural heights, vertically centred in the
         # card (so a screen with few rows doesn't stretch into huge bars).
         pad = int(pw * 0.06)
@@ -524,6 +544,8 @@ class Screen:
     def on_tap(self, x, y):
         if _hit(self.close_rect, x, y):
             return 'close'
+        if _hit(self.back_rect, x, y):
+            return self.back_target()
         for w in self._widgets:
             if w.hit(x, y):
                 return w.tap(self, x, y)
@@ -547,6 +569,7 @@ def _q(text):
 
 class RootMenu(Screen):
     title = 'Einstellungen'
+    show_back = False          # the root menu closes via ×; no back button
 
     def widgets(self):
         return [
@@ -573,7 +596,6 @@ class WifiScreen(Screen):
         return [
             InfoBlock('st', lines, weight=2.0),
             Row('change', 'Am Handy ändern', target=lambda: QRScreen(self.ui, '/setup')),
-            self.back_row(),
         ]
 
 
@@ -605,7 +627,6 @@ class DisplayScreen(Screen):
             Slider('bright', 'Helligkeit', lambda: self.state['brightness'], set_bright),
             Row('orient', 'Ausrichtung', on_tap=toggle_orient,
                 value=('Hochkant' if self.state['orientation'] == 'vertical' else 'Quer')),
-            self.back_row(),
         ]
 
 
@@ -648,7 +669,6 @@ class SleepScreen(Screen):
             Days('days', lambda: self.state['weekdays'], set_days),
             Row('method', 'Methode & Test', target=lambda: MethodScreen(self.ui)),
             Row('now', 'Jetzt schlafen', on_tap=self.act('/sleep'), kind='primary'),
-            self.back_row(),
         ]
 
 
@@ -658,6 +678,9 @@ class MethodScreen(Screen):
     _NAMES = {'ddcci': 'DDC/CI', 'hdmi': 'HDMI aus', 'dpms': 'DPMS',
               'brightness': 'Helligkeit 0', 'black_only': 'Nur schwarz'}
     state = None
+
+    def back_target(self):
+        return SleepScreen(self.ui)
 
     def widgets(self):
         if self.state is None:
@@ -678,7 +701,6 @@ class MethodScreen(Screen):
                 kind='primary'),
             Row('sleepnow', 'Jetzt schlafen', on_tap=self.act('/sleep')),
             Row('wakenow', 'Jetzt wecken', on_tap=self.act('/wake')),
-            self.back_row(),
         ]
 
 
@@ -704,7 +726,6 @@ class SlideshowScreen(Screen):
             Row('sync', 'Jetzt synchronisieren',
                 on_tap=self.act('/sync/trigger', result='rerender'),
                 value=('läuft …' if running else None), kind='primary'),
-            self.back_row(),
         ]
 
 
@@ -721,7 +742,6 @@ class AlbumsScreen(Screen):
             InfoBlock('names', lines, weight=2.6),
             Row('edit', 'Quellen am Handy bearbeiten',
                 target=lambda: QRScreen(self.ui, '/remote')),
-            self.back_row(),
         ]
 
 
@@ -744,7 +764,6 @@ class SystemScreen(Screen):
             Row('access', 'Zugang / QR', target=lambda: QRScreen(self.ui, '/remote')),
             Row('power', 'Aus / Neustart', target=lambda: PowerScreen(self.ui),
                 kind='danger'),
-            self.back_row(),
         ]
 
 
@@ -783,7 +802,6 @@ class QRScreen(Screen):
             self._mods = qr.get('modules')
         return [
             QRBlock('qr', self._mods, caption=self._cap),
-            self.back_row(),
         ]
 
 
@@ -804,6 +822,7 @@ class NativeUI:
         self.orientation = orientation
         self.api_base = api_base
         self.screen = None
+        self._tap_guard = 0.0     # ignore taps until this time (post-nav debounce)
 
     def panel_rect(self):
         """The centred settings card, sized by orientation. Roomy enough for
@@ -867,14 +886,19 @@ class NativeUI:
         """Feed a screen-space tap; returns True while the menu stays open."""
         if self.screen is None:
             return False
+        now = time.time()
+        if now < self._tap_guard:
+            return True            # swallow a bounce tap right after a navigation
         nxt = self.screen.on_tap(x, y)
         if nxt == 'close':
             self.screen = None
             return False
         if nxt == 'rerender':
+            self._tap_guard = now + 0.35
             self.screen.render(self.canvas)
             return True
         if isinstance(nxt, Screen):
+            self._tap_guard = now + 0.35
             self.screen = nxt
             self.screen.render(self.canvas)
         return True
