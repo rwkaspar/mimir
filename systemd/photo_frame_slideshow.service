@@ -1,0 +1,26 @@
+[Unit]
+Description=Digital Photo Frame Native Slideshow (photos + videos, no browser)
+After=network.target photo_frame_server.service
+Wants=photo_frame_server.service
+# The native slideshow owns the display directly (DRM/kmssink + fbcon). It and
+# the labwc/cog kiosk both need the DRM master, so they must never run together.
+Conflicts=photo_frame_cage.service
+Conflicts=display-manager.service
+
+[Service]
+Type=simple
+User=frame
+SupplementaryGroups=video input render
+TTYPath=/dev/tty1
+WorkingDirectory=/home/frame/digital_photo_frame
+# System python3 (not the venv) — it has python3-gi/GStreamer for the seamless
+# video loop. The module only needs stdlib + PyYAML (python3-yaml) + gi.
+ExecStartPre=/bin/mkdir -p /tmp/frame-runtime
+# Quit Plymouth so it releases the DRM master before the slideshow grabs it.
+ExecStartPre=+-/usr/bin/plymouth quit
+ExecStart=/usr/bin/python3 -m frame.slideshow /home/frame/digital_photo_frame/config_frame.yaml
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
