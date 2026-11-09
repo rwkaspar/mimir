@@ -622,16 +622,43 @@ class DisplayScreen(Screen):
             self.state['brightness'] = v
             self.ui.api_post('/brightness', {'value': v})
 
-        def toggle_orient():
-            self.state['orientation'] = ('vertical'
-                if self.state['orientation'] == 'horizontal' else 'horizontal')
-            self.ui.api_post('/orientation', {'orientation': self.state['orientation']})
-            return 'rerender'
-
+        current = self.state['orientation']
+        other = 'vertical' if current == 'horizontal' else 'horizontal'
         return [
             Slider('bright', 'Helligkeit', lambda: self.state['brightness'], set_bright),
-            Row('orient', 'Ausrichtung', on_tap=toggle_orient,
-                value=('Hochkant' if self.state['orientation'] == 'vertical' else 'Quer')),
+            Row('orient', 'Ausrichtung',
+                target=lambda: OrientationConfirmScreen(self.ui, other),
+                value=('Hochkant' if current == 'vertical' else 'Quer')),
+        ]
+
+
+class OrientationConfirmScreen(Screen):
+    title = 'Ausrichtung ändern'
+
+    def __init__(self, ui, target):
+        super().__init__(ui)
+        self.target = target
+
+    def back_target(self):
+        return DisplayScreen(self.ui)
+
+    def widgets(self):
+        label = 'Hochkant' if self.target == 'vertical' else 'Quer'
+        return [
+            InfoBlock('warn', [
+                'Die Ausrichtung zu ändern',
+                'startet das Gerät neu.',
+                '',
+                'Jetzt neu starten und',
+                'auf %s umstellen?' % label,
+            ], weight=3.2),
+            Row('go', 'Ja, neu starten',
+                on_tap=self.act('/api/orientation/rotate',
+                                {'orientation': self.target, 'degrees': 90},
+                                result='close'),
+                kind='danger'),
+            Row('cancel', 'Abbrechen', target=lambda: DisplayScreen(self.ui),
+                kind='back'),
         ]
 
 

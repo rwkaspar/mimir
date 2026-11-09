@@ -464,9 +464,16 @@ class NativeSlideshow:
             self._hold_bg = None       # the menu is about to take the framebuffer
             on_hot_corner()
 
+        # In vertical (rotate=90) mounting the panel is turned 90°, so the raw
+        # touch axes need swapping/flipping to match the rotated screen. Best
+        # guess for rotate=90; calibrate against the live panel if taps land off.
+        orient = self._orientation()
+        swap = (orient == 'vertical')
+        flip_y = (orient == 'vertical')
         self._touch = native_ui.TouchReader(
             self.fb_w, self.fb_h, on_tap=on_tap, on_hot_corner=on_hot_corner_fire,
-            on_hot_progress=self._on_hot_progress, on_hot_cancel=self._on_hot_cancel)
+            on_hot_progress=self._on_hot_progress, on_hot_cancel=self._on_hot_cancel,
+            swap=swap, flip_y=flip_y)
         threading.Thread(target=self._touch.run, daemon=True).start()
         logger.info("Touch menu armed (hot corner: hold top-right)")
 

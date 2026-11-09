@@ -196,6 +196,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.handle_save_connect()
         elif self.path == '/orientation':
             self.handle_save_orientation()
+        elif self.path == '/api/orientation/rotate':
+            self.handle_rotate_orientation()
         elif self.path == '/brightness':
             self.handle_set_brightness()
         elif self.path == '/sync/trigger':
@@ -1015,6 +1017,42 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Error saving orientation: {e}")
             self.send_error(400, str(e))
+
+    def handle_rotate_orientation(self):
+        """Change the physical mounting orientation: save it, apply the KMS
+        display rotation to the boot cmdline, and reboot (the on-panel menu asks
+        for confirmation first). A reboot is required because the rotation is a
+        kernel/KMS setting, not a runtime toggle."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body) if body else {}
+            new_orientation = data.get('orientation', 'horizontal')
+            if new_orientation not in ('horizontal', 'vertical'):
+                raise ValueError('Invalid orientation')
+            degrees = str(int(data.get('degrees', 90)))
+
+            with open(self.app.config_path) as f:
+                cfg = yaml.safe_load(f)
+            cfg.setdefault('frame', {})['orientation'] = new_orientation
+            with open(self.app.config_path, 'w') as f:
+                yaml.dump(cfg, f, default_flow_style=False)
+            self.app.config.setdefault('frame', {})['orientation'] = new_orientation
+
+            self._json_response({'ok': True})
+
+            repo_dir = Path(__file__).resolve().parent.parent
+            script = repo_dir / 'scripts' / 'set_display_rotation.sh'
+
+            def apply_and_reboot():
+                time.sleep(1)
+                subprocess.run(['sudo', str(script), new_orientation, degrees],
+                               capture_output=True, timeout=20)
+                subprocess.run(['sudo', 'reboot'], capture_output=True, timeout=10)
+            threading.Thread(target=apply_and_reboot, daemon=True).start()
+        except Exception as e:
+            logger.error(f"Error rotating orientation: {e}")
+            self._json_response({'ok': False, 'error': str(e)}, 400)
 
     def handle_sync_trigger(self):
         """Trigger a manual photo sync."""
