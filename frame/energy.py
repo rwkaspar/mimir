@@ -134,6 +134,7 @@ class EnergySaveManager:
         self.weekdays = [0, 1, 2, 3, 4, 5, 6]  # all days (JS getDay: 0=Sun)
         self.sleeping = False
         self._wake_event = threading.Event()
+        self._healing = False   # a wake-healer thread is retrying a dropped panel
         # Sleep method from config
         config = app_state.config if app_state else {}
         self.method = config.get('energy_save', {}).get('method', 'ddcci')
@@ -253,12 +254,75 @@ class EnergySaveManager:
                          capture_output=True, timeout=5, env=self._wayland_env())
         # black_only: no additional command (framebuffer already zeroed)
 
+    def _display_is_on(self):
+        """Panel power state via DDC/CI VCP D6: True = on, False = standby/off,
+        None = unreachable (panel dropped off USB/DDC — the recurring
+        over-current transient on this unit)."""
+        try:
+            out = subprocess.run(['sudo', 'ddcutil', 'getvcp', 'd6'],
+                                 capture_output=True, text=True, timeout=8)
+            s = (out.stdout or '') + (out.stderr or '')
+            if 'Display not found' in s or 'communication failed' in s.lower():
+                return None
+            if 'DPM: On' in s or 'sl=0x01' in s:
+                return True
+            if 'DPM:' in s or 'sl=0x' in s:
+                return False
+        except Exception as e:
+            logger.debug("getvcp d6 failed: %s", e)
+        return None
+
+    def _ddc_wake(self, retries=3):
+        """Send the DDC wake (D6=1) and VERIFY the panel reports On. A single
+        blind setvcp was unreliable: if the panel was asleep/half-dropped the
+        command silently did nothing and the frame stayed black until someone
+        intervened. Retry a few times; if it still won't confirm, hand off to a
+        background healer that keeps trying until the panel re-appears."""
+        for _ in range(max(1, retries)):
+            subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '1'],
+                           capture_output=True, timeout=10)
+            if self._display_is_on() is True:
+                return True
+            time.sleep(2)
+        self._start_wake_healer()
+        return False
+
+    def _start_wake_healer(self):
+        """Background retry loop for a panel that won't wake (USB/DDC dropped).
+        Re-issues the DDC wake every 60s until the panel confirms On or the frame
+        is put back to sleep — so a panel that re-enumerates hours later comes
+        back on its own instead of staying black until a manual wake."""
+        if self._healing:
+            return
+        self._healing = True
+        threading.Thread(target=self._wake_heal_loop, daemon=True).start()
+
+    def _wake_heal_loop(self):
+        logger.warning("Wake: panel not responding to DDC (likely USB/DDC "
+                       "dropped) — healer will retry every 60s until it returns")
+        try:
+            for attempt in range(1, 181):   # cap ~3h of 60s ticks
+                if self.sleeping:
+                    return
+                time.sleep(60)
+                if self.sleeping:
+                    return
+                subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '1'],
+                               capture_output=True, timeout=10)
+                if self._display_is_on() is True:
+                    logger.info("Wake healer: panel back On after %d retr%s",
+                                attempt, 'y' if attempt == 1 else 'ies')
+                    return
+            logger.warning("Wake healer: gave up after ~3h, panel still "
+                           "unreachable (needs physical power-cycle)")
+        finally:
+            self._healing = False
+
     def _backlight_on(self):
         """Turn on backlight using configured method."""
         method = self.method
         if method == 'ddcci':
-            subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '1'],
-                         capture_output=True, timeout=10)
+            self._ddc_wake()
         elif method == 'dpms':
             subprocess.run(['wlopm', '--on', '*'],
                          capture_output=True, timeout=5, env=self._wayland_env())
