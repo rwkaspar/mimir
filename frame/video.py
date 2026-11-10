@@ -68,7 +68,8 @@ def probe_video(path: Path) -> Optional[dict]:
 
 
 def _build_filter(src_w: int, src_h: int, tgt_w: int, tgt_h: int,
-                  blur_radius: int, blur_fill: bool = True) -> str:
+                  blur_radius: int, blur_fill: bool = True,
+                  post_rotate: bool = False) -> str:
     """Build ffmpeg filter graph: same orientation = scale+crop, cross = blur-fill.
 
     To keep memory low on Pi Zero, we ALWAYS scale source to the target
@@ -77,24 +78,37 @@ def _build_filter(src_w: int, src_h: int, tgt_w: int, tgt_h: int,
 
     blur_radius is the PIL Gaussian radius from photo config; map to ffmpeg
     boxblur luma_radius (rough ratio).
+
+    tgt_w/tgt_h are the LOGICAL compose dimensions. For a vertical (portrait)
+    mount that is portrait (e.g. 1200x1920); the Pi's vc4 can't rotate the
+    framebuffer or a live kmssink stream, and the Zero can't software-rotate
+    1080p30 in realtime — so when post_rotate is set we bake a 90° CCW
+    transpose into the LAST step of every branch. The file then comes out at
+    the physical landscape panel size (1920x1200) and plays upright on the
+    panel that is physically turned 90°. This mirrors the photo path in
+    slideshow._render_photo (transpose=2) exactly, so photos and videos share
+    one rotation convention.
     """
     src_landscape = src_w >= src_h
     tgt_landscape = tgt_w >= tgt_h
     box_r = max(5, blur_radius // 2)
+    # transpose=2 = 90° counter-clockwise, same as the photo compositor.
+    rot = ",transpose=2" if post_rotate else ""
 
-    # setsar=1 on every branch: a non-1:1 output SAR makes the Pi kmssink
-    # scanout show a band of green garbage along the bottom edge (an inherited
-    # odd SAR from the source, or introduced by scaling). Forcing square pixels
-    # keeps the HW-decoded frame clean on the native player.
+    # setsar=1 on every branch (kept LAST, after any transpose): a non-1:1
+    # output SAR makes the Pi kmssink scanout show a band of green garbage along
+    # the bottom edge (an inherited odd SAR from the source, or introduced by
+    # scaling). Forcing square pixels keeps the HW-decoded frame clean on the
+    # native player.
     if src_landscape == tgt_landscape:
         # Same orientation: scale to cover, center-crop
         return (f"scale={tgt_w}:{tgt_h}:force_original_aspect_ratio=increase,"
-                f"crop={tgt_w}:{tgt_h},setsar=1")
+                f"crop={tgt_w}:{tgt_h}{rot},setsar=1")
 
     if not blur_fill:
         # Letterbox fallback: scale to fit, pad with black. Lowest memory.
         return (f"scale={tgt_w}:{tgt_h}:force_original_aspect_ratio=decrease,"
-                f"pad={tgt_w}:{tgt_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1")
+                f"pad={tgt_w}:{tgt_h}:(ow-iw)/2:(oh-ih)/2:color=black{rot},setsar=1")
 
     # Cross orientation blur-fill: scale source down FIRST so split copies
     # work on a small frame, then build the blur background + overlay.
@@ -102,7 +116,7 @@ def _build_filter(src_w: int, src_h: int, tgt_w: int, tgt_h: int,
         f"[0:v]scale={tgt_w}:{tgt_h}:force_original_aspect_ratio=decrease,split=2[bg][fg];"
         f"[bg]scale={tgt_w}:{tgt_h}:force_original_aspect_ratio=increase,"
         f"crop={tgt_w}:{tgt_h},boxblur={box_r}:1,eq=brightness=-0.2[bg2];"
-        f"[bg2][fg]overlay=(W-w)/2:(H-h)/2,setsar=1"
+        f"[bg2][fg]overlay=(W-w)/2:(H-h)/2{rot},setsar=1"
     )
 
 
@@ -281,13 +295,18 @@ def transcode_video(source_path: Path, output_dir: Path,
         src_landscape = src_w >= src_h
         tgt_landscape = tgt_w >= tgt_h
         is_cross = (src_landscape != tgt_landscape)
+        # Vertical (portrait) mount: compose in logical portrait (tgt_w/tgt_h
+        # are already portrait here) then bake a 90° CCW transpose so the file
+        # comes out landscape and plays upright on the physically-turned panel.
+        # Matches slideshow._render_photo. See _build_filter.
+        post_rotate = (orient == 'vertical')
 
         try:
             out_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Try blur-fill (cross-orient) or scale+crop (same-orient)
             vf = _build_filter(src_w, src_h, tgt_w, tgt_h, blur_radius,
-                               blur_fill=True)
+                               blur_fill=True, post_rotate=post_rotate)
             rc, err = _run(vf, complex_filter=is_cross)
 
             if rc != 0 and is_cross:
@@ -296,7 +315,7 @@ def transcode_video(source_path: Path, output_dir: Path,
                 logger.warning(f"Blur-fill failed for {filename} ({orient}); "
                                f"retrying with letterbox. err={err[:200]}")
                 vf_lb = _build_filter(src_w, src_h, tgt_w, tgt_h, blur_radius,
-                                      blur_fill=False)
+                                      blur_fill=False, post_rotate=post_rotate)
                 rc, err = _run(vf_lb, complex_filter=False)
 
             if rc != 0:
