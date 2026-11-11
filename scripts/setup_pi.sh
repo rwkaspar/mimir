@@ -432,7 +432,6 @@ ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl stop photo_frame_slideshow
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl start photo_frame_slideshow
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart photo_frame_slideshow
 ${FRAME_USER} ALL=(ALL) NOPASSWD: ${REPO_DIR}/scripts/install_bootsplash.sh
-${FRAME_USER} ALL=(ALL) NOPASSWD: ${REPO_DIR}/scripts/set_display_rotation.sh
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/dd
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/setterm
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /sbin/shutdown
