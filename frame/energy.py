@@ -133,6 +133,12 @@ class EnergySaveManager:
         self.on_time = '07:00'
         self.weekdays = [0, 1, 2, 3, 4, 5, 6]  # all days (JS getDay: 0=Sun)
         self.sleeping = False
+        # True when the current sleep was requested on-demand (HTTP /sleep, HA
+        # OFF, the wizard test) rather than by the schedule. The scheduler must
+        # NOT auto-wake such a sleep just because the clock is outside the
+        # configured off-window — otherwise a manual sleep is undone within one
+        # 30s _check() tick. Cleared on any wake.
+        self._manual_sleep = False
         self._wake_event = threading.Event()
         self._healing = False   # a wake-healer thread is retrying a dropped panel
         # Sleep method from config
@@ -202,6 +208,9 @@ class EnergySaveManager:
     def sleep_now(self):
         """Put the display to sleep immediately (HA/manual 'off')."""
         if not self.sleeping:
+            # Mark this as a manual sleep so the scheduler's _check() loop does
+            # not immediately wake it back up when we're outside the off-window.
+            self._manual_sleep = True
             threading.Thread(target=lambda: self._set_sleep(True), daemon=True).start()
 
     def set_brightness(self, value):
@@ -401,6 +410,7 @@ class EnergySaveManager:
                 # Restore backlight via configured method
                 self._backlight_on()
                 self.sleeping = False
+                self._manual_sleep = False  # any wake clears the manual override
                 logger.info(f"Wake: started display service ({self.method})")
                 self._notify_state()  # reflect "on" in HA
         except Exception as e:
@@ -555,7 +565,10 @@ class EnergySaveManager:
         should_sleep = self._in_off_period()
         if should_sleep and not self.sleeping:
             self._set_sleep(True)
-        elif not should_sleep and self.sleeping:
+        elif not should_sleep and self.sleeping and not self._manual_sleep:
+            # Only auto-wake sleeps the SCHEDULE itself started. A manual/HA
+            # sleep stays asleep until an explicit wake (HTTP /wake, HA ON, or a
+            # touch), so an on-demand "off" isn't undone seconds later.
             self._set_sleep(False)
 
     def _loop(self):
