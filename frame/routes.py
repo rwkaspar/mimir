@@ -1013,6 +1013,15 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
                             logger.info(f"Boot splash rebuilt for {new_orientation}")
                         except Exception as e:
                             logger.warning(f"Boot splash rebuild failed: {e}")
+                    # Rebuild the newly-active orientation from the sources and
+                    # shrink the old one back to the shipped defaults (one full
+                    # library on disk at a time).
+                    syncer = self.app.syncer if self.app else None
+                    if syncer is not None:
+                        try:
+                            syncer.switch_orientation(old_orientation)
+                        except Exception as e:
+                            logger.warning(f"Orientation switch sync failed: {e}")
                 threading.Thread(target=apply_orientation, daemon=True).start()
         except Exception as e:
             logger.error(f"Error saving orientation: {e}")
@@ -1035,6 +1044,7 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
 
             with open(self.app.config_path) as f:
                 cfg = yaml.safe_load(f)
+            old_orientation = cfg.get('frame', {}).get('orientation', 'horizontal')
             cfg.setdefault('frame', {})['orientation'] = new_orientation
             with open(self.app.config_path, 'w') as f:
                 yaml.dump(cfg, f, default_flow_style=False)
@@ -1042,10 +1052,21 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
 
             self._json_response({'ok': True})
 
+            syncer = self.app.syncer if self.app else None
+            changed = new_orientation != old_orientation
+
             def restart_display():
                 time.sleep(1)
                 subprocess.run(['sudo', 'systemctl', 'restart', DISPLAY_SERVICE],
                                capture_output=True, timeout=15)
+                # On a real change, rebuild the newly-active orientation from the
+                # sources and shrink the old one back to the shipped defaults, so
+                # the device never keeps two full libraries on disk.
+                if changed and syncer is not None:
+                    try:
+                        syncer.switch_orientation(old_orientation)
+                    except Exception as e:
+                        logger.error(f"Orientation switch sync failed: {e}")
             threading.Thread(target=restart_display, daemon=True).start()
         except Exception as e:
             logger.error(f"Error changing orientation: {e}")

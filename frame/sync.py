@@ -111,6 +111,51 @@ class PhotoSyncer:
                 return
         self.run_sync()
 
+    def switch_orientation(self, old_orientation: str):
+        """React to an orientation change: shrink the now-inactive orientation
+        back to the shipped default samples and full-sync the new current one.
+
+        We deliberately keep only ONE orientation's full library on disk; the
+        other holds just the few shipped defaults. Switching rebuilds the newly-
+        active orientation from the sources and prunes the old one, so the device
+        never consumes double the storage for media the user isn't viewing. The
+        new orientation is read from config (already updated by the caller).
+
+        Safe to call from a request/background thread: it stops any in-flight
+        sync (which was for the old orientation), prunes, then kicks off a fresh
+        non-blocking sync.
+        """
+        photos_config = self._config.get('photos', {})
+        base_dir = Path(photos_config.get('base_dir', '/srv/frame/photos'))
+        db_path = photos_config.get('state_db', str(base_dir / 'state.db'))
+
+        # Stop an in-flight sync (it targeted the old orientation) and wait,
+        # capped, for it to exit so the follow-up run_sync() isn't skipped.
+        self.stop()
+        deadline = time.time() + 20
+        while self._running and time.time() < deadline:
+            time.sleep(0.2)
+
+        # Prune the old orientation's synced media + clear its DB refs, then
+        # re-seed the shipped defaults so it isn't left empty.
+        try:
+            db = PhotoDatabase(db_path)
+            try:
+                removed = db.cleanup_orientation(old_orientation, 0, base_dir)
+            finally:
+                db.close()
+            self._restore_defaults(base_dir)
+            logger.info("Orientation switch: pruned %d file(s) from %s back to "
+                        "shipped defaults", removed, old_orientation)
+        except Exception as e:
+            logger.error("Orientation switch prune failed for %s: %s",
+                         old_orientation, e)
+
+        # Full-sync the new (now current) orientation. restart() runs it fresh
+        # when idle, or relaunches for the new orientation if an old sync is
+        # still winding down — so the new orientation is never left un-synced.
+        self.restart()
+
     def get_status(self) -> dict:
         """Return current sync status, including pending count from DB when idle."""
         with self._lock:
@@ -392,14 +437,15 @@ class PhotoSyncer:
             # --- Phase 3: Download and process new photos ---
             self._set_phase('downloading')
 
-            # Only process into the current orientation; keep ≤100 in the other
+            # Full-sync ONLY the current orientation. The other orientation is
+            # left as the handful of shipped default samples (see
+            # _restore_defaults) until the user actually switches to it — then
+            # switch_orientation() full-syncs the new one and prunes this one
+            # back to defaults. Keeping just one full library avoids halving
+            # usable storage for media the user isn't currently viewing.
             orientation = self._config.get('frame', {}).get('orientation', 'horizontal')
-            other_orientation = 'vertical' if orientation == 'horizontal' else 'horizontal'
-            other_dir = base_dir / other_orientation
-            other_count = _count_media(other_dir)
-            other_limit = 100
 
-            logger.info(f"Sync orientation: {orientation} (other has {other_count}/{other_limit})")
+            logger.info(f"Sync orientation: {orientation} (other kept at shipped defaults only)")
 
             unprocessed = db.get_unprocessed(orientation)
             total = len(unprocessed)
@@ -485,11 +531,9 @@ class PhotoSyncer:
 
                 downloaded += 1
 
-                # Decide which orientations to process
+                # Only ever process the current orientation; the other is served
+                # by the shipped defaults until the user switches (see above).
                 process_orientations = [orientation]
-                if other_count < other_limit and not item.get('other_filename'):
-                    process_orientations.append(other_orientation)
-                    other_count += 1
 
                 media_type = item.get('media_type', 'photo')
                 if media_type == 'video':
