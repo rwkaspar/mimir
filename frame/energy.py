@@ -248,8 +248,7 @@ class EnergySaveManager:
         """Turn off backlight using configured method."""
         method = self.method
         if method == 'ddcci':
-            subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '4'],
-                         capture_output=True, timeout=10)
+            self._ddc_sleep()
         elif method == 'dpms':
             # Run as our own user (the compositor runs as robert too); sudo would
             # strip WAYLAND_DISPLAY/XDG_RUNTIME_DIR so wlopm couldn't connect.
@@ -294,6 +293,28 @@ class EnergySaveManager:
                 return True
             time.sleep(2)
         self._start_wake_healer()
+        return False
+
+    def _ddc_sleep(self, retries=3):
+        """Send the DDC standby (D6=4) and VERIFY the panel reports Off. The
+        symmetric twin of _ddc_wake: a single blind `setvcp d6 4` is unreliable
+        on this unit's flaky DDC bus (DDCRC_READ_ALL_ZERO) — if the write is lost
+        the backlight silently stays ON for the entire sleep (the recurring
+        "backlight on in sleep" symptom). Retry until the panel confirms standby.
+        _display_is_on() returns False for standby, None if the panel is
+        unreachable (dropped off USB) — in which case there is no backlight to
+        worry about, so we stop retrying and just warn."""
+        for _ in range(max(1, retries)):
+            subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '4'],
+                           capture_output=True, timeout=10)
+            state = self._display_is_on()
+            if state is False:
+                return True
+            if state is None:
+                break  # panel unreachable → backlight already dark; don't spin
+            time.sleep(2)
+        logger.warning("Sleep: panel did not confirm DDC standby after retries "
+                       "(backlight may stay on) — flaky DDC bus")
         return False
 
     def _start_wake_healer(self):
