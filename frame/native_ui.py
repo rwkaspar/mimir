@@ -1112,16 +1112,8 @@ class NativeUI:
         self.orientation = orientation
         self.api_base = api_base
         self.screen = None
-        # Bounce guard: when a tap NAVIGATES, remember that button's rect; a tap
-        # on the new screen that lands in that same rect WITHIN a short window is
-        # swallowed. That eats the laggy-panel "tap again because nothing happened"
-        # bounce, while a deliberate tap on a control that genuinely sits there —
-        # arriving after the user has read the new screen — goes through on the
-        # first try. (A pure position guard with no time bound made every control
-        # under a just-navigated spot need two taps, which top-aligned screens hit
-        # constantly.) Also clears on the next tap regardless.
-        self._swallow_rect = None
-        self._swallow_until = 0.0     # bounce-guard expiry (monotonic seconds)
+        # (No bounce/double-tap guard: it was dropping legitimate first taps on
+        # this slow-Pi + top-aligned-screen setup. Every tap is acted on.)
         # Render is ~130-280ms per frame on the Zero. If it runs on the touch
         # thread, that thread can't read new events while it renders, so taps
         # pile up in the evdev buffer and replay in a confusing burst ("I tapped
@@ -1215,27 +1207,16 @@ class NativeUI:
         """Feed a screen-space tap; returns True while the menu stays open."""
         if self.screen is None:
             return False
-        # Swallow a bounce tap at the spot we just navigated from, but only
-        # briefly — a deliberate tap there a moment later is meant for the control
-        # now at that spot, not a bounce.
-        if self._swallow_rect is not None:
-            inside = _hit(self._swallow_rect, x, y) and time.time() < self._swallow_until
-            self._swallow_rect = None
-            if inside:
-                return True
         nxt = self.screen.on_tap(x, y)
-        src_rect = self.screen.hit_rect
         if nxt == 'close':
             self.screen = None
             return False
         if nxt == 'rerender':
-            self.screen.render(self.canvas)   # same screen: don't guard re-taps
+            self.screen.render(self.canvas)
             return True
         if isinstance(nxt, Screen):
             self.screen = nxt
             self.screen.render(self.canvas)
-            self._swallow_rect = src_rect     # dead-zone that spot on the new screen
-            self._swallow_until = time.time() + 0.7   # ...but only for a moment
         return True
 
 
