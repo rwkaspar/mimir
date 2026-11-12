@@ -35,11 +35,14 @@ Flash the image, point it at a shared album, hang it on the wall.
 The entire settings UI is rendered natively on the frame — open it any time by
 **holding the top-right corner for ~1.5 s**.
 
-| Settings menu | Sleep timer |
+| Settings menu | Clock & date overlay |
 |:---:|:---:|
-| ![Settings menu](docs/screenshots/settings-menu.png) | ![Sleep timer](docs/screenshots/sleep-timer.png) |
-| **System info** | **Phone remote (QR)** |
-| ![System info](docs/screenshots/system-info.png) | ![Remote QR](docs/screenshots/remote-qr.png) |
+| ![Settings menu](docs/screenshots/settings-menu.png) | ![Clock and date](docs/screenshots/clock.png) |
+| **Sleep timer** | **Phone remote (QR)** |
+| ![Sleep timer](docs/screenshots/sleep-timer.png) | ![Remote QR](docs/screenshots/remote-qr.png) |
+
+Each menu row shows its current state inline (Wi-Fi, orientation, sleep window,
+interval, album count), so the whole frame reads at a glance.
 
 ## How it works
 
@@ -74,6 +77,7 @@ Raspberry Pi Zero 2 W
 **Display & interaction**
 - **Native slideshow** — direct hardware video decode and rendering; no browser.
 - **On-device touch UI** — WiFi, display, orientation, sleep, slideshow, albums, system info and power, all drawn to the framebuffer.
+- **Clock & date overlay** — optional, with size and corner position, drawn over the slideshow.
 - **Phone remote** (`/remote`) — add/remove albums and run "Sync Now" from a QR code.
 - **Auto resolution detection** — reads the panel size from the framebuffer.
 - **Bilingual** — English and German (i18n).
