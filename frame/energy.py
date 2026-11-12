@@ -140,6 +140,7 @@ class EnergySaveManager:
         # 30s _check() tick. Cleared on any wake.
         self._manual_sleep = False
         self._wake_timer = None   # threading.Timer for an auto-wake sleep timer
+        self._wake_hint = None    # "HH:MM" to show on the pre-sleep splash
         self._wake_event = threading.Event()
         self._healing = False   # a wake-healer thread is retrying a dropped panel
         # Sleep method from config
@@ -221,6 +222,9 @@ class EnergySaveManager:
             self._manual_sleep = True
             self._cancel_wake_timer()
             if wake_after_minutes and wake_after_minutes > 0:
+                # Wall-clock time the auto-wake will fire, for the pre-sleep hint.
+                self._wake_hint = time.strftime(
+                    '%H:%M', time.localtime(time.time() + wake_after_minutes * 60))
                 t = threading.Timer(float(wake_after_minutes) * 60.0,
                                     self._timed_wake)
                 t.daemon = True
@@ -228,6 +232,8 @@ class EnergySaveManager:
                 t.start()
                 logger.info("Manual sleep, auto-wake in %s min",
                             wake_after_minutes)
+            else:
+                self._wake_hint = None   # untimed sleep: don't show a stale time
             threading.Thread(target=lambda: self._set_sleep(True), daemon=True).start()
 
     def _timed_wake(self):
@@ -397,6 +403,36 @@ class EnergySaveManager:
                          capture_output=True, timeout=5, env=self._wayland_env())
         # black_only: no additional command
 
+    def _show_sleep_hint(self, seconds=2.5):
+        """Draw a brief centred 'going to sleep — back at HH:MM' splash to fb0.
+
+        Called while the slideshow is stopped (we own the framebuffer). Reuses
+        the native UI's FbCanvas so orientation/rotation match the panel. Best
+        effort: any failure is swallowed and sleep continues to the black-out."""
+        try:
+            from frame import native_ui
+            orient = 'horizontal'
+            if self.app and getattr(self.app, 'config', None):
+                orient = self.app.config.get('frame', {}).get('orientation', 'horizontal')
+            canvas = native_ui.FbCanvas(orientation=orient)
+            canvas.clear((16, 18, 22))
+            canvas.paste_logo(x=48, y=40, width=150)
+            d = canvas.draw()
+            cx, cy = canvas.w // 2, canvas.h // 2
+            big = canvas.font(max(28, canvas.h // 16))
+            small = canvas.font(max(20, canvas.h // 30))
+            title_y = cy if not self._wake_hint else cy - canvas.h // 20
+            d.text((cx, title_y), 'Rahmen schläft', font=big,
+                   fill=(236, 238, 240), anchor='mm')
+            if self._wake_hint:
+                d.text((cx, cy + canvas.h // 20),
+                       'Wieder an um %s Uhr' % self._wake_hint, font=small,
+                       fill=(150, 156, 164), anchor='mm')
+            canvas.flush()
+            time.sleep(seconds)
+        except Exception as e:
+            logger.debug('sleep hint render failed: %s', e)
+
     def _set_sleep(self, sleep):
         try:
             if sleep and not self.sleeping:
@@ -407,6 +443,11 @@ class EnergySaveManager:
                 subprocess.run(['sudo', 'systemctl', 'stop', DISPLAY_SERVICE],
                              capture_output=True, timeout=15)
                 time.sleep(1)
+                # Brief splash telling the viewer WHEN the frame comes back — the
+                # slideshow has released fb0, so we own it now. Touch-to-wake is
+                # unreliable (ddcci drops the touch USB), so we never promise a
+                # tap; we show the actual wake time instead. Then black out.
+                self._show_sleep_hint()
                 # Fill framebuffer with black — keeps HDMI signal active
                 # (avoids ANMITE "no signal" blue screen that DPMS causes)
                 subprocess.run(['sudo', 'dd', 'if=/dev/zero', 'of=/dev/fb0',
@@ -621,6 +662,7 @@ class EnergySaveManager:
             return
         should_sleep = self._in_off_period()
         if should_sleep and not self.sleeping:
+            self._wake_hint = self.on_time   # scheduled wake time for the splash
             self._set_sleep(True)
         elif not should_sleep and self.sleeping and not self._manual_sleep:
             # Only auto-wake sleeps the SCHEDULE itself started. A manual/HA

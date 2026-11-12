@@ -259,9 +259,14 @@ videos:
   max_duration: 120
   max_filesize_mb: 100
 slideshow:
-  interval: 10
+  interval: 30
   fade_duration: 1.0
   transition: fade
+clock:
+  enabled: false
+  size: m
+  position: br
+  show_date: true
 synology:
   share_urls: []
   share_passphrases: []

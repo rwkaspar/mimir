@@ -150,6 +150,7 @@
 <body>
     <h1 id="r-title">FolderSync</h1>
     <div class="subtitle" id="r-subtitle">Configure photo sources</div>
+    <div id="r-note" style="margin:0 0 16px;padding:10px 12px;border-radius:10px;background:rgba(120,140,170,0.12);border:1px solid rgba(120,140,170,0.25);font-size:13px;line-height:1.4;color:#9aa6b4;">This page runs locally on your frame.</div>
 
     <h2 class="section-header" id="r-syn-header">Synology Photos</h2>
     <div id="albums"></div>
@@ -243,6 +244,12 @@
                 photos: ' photos', left: ' left', lost_connection: 'Lost connection',
                 empty_passphrase: '(leave empty if none)',
                 confirm_sync: 'Start photo sync? The frame may become unresponsive until syncing is finished.',
+                note: 'This page runs locally on your frame. The browser’s “Not secure” warning is normal — no data is sent to the internet.',
+                ha_header: 'Home Assistant (MQTT)', ha_enable: 'Control the frame from Home Assistant',
+                ha_save: 'Save Home Assistant',
+                connect_header: 'mimir Connect (remote photos)',
+                connect_enable: 'Let people send photos to this frame from anywhere',
+                connect_save: 'Save Connect',
             },
             de: {
                 title: 'FolderSync', subtitle: 'Fotoquellen konfigurieren',
@@ -259,9 +266,15 @@
                 photos: ' Fotos', left: ' \u00fcbrig', lost_connection: 'Verbindung verloren',
                 empty_passphrase: '(leer lassen wenn keins)',
                 confirm_sync: 'Foto-Sync starten? Der Rahmen reagiert m\u00f6glicherweise nicht, bis die Synchronisierung abgeschlossen ist.',
+                note: 'Diese Seite l\u00e4uft lokal auf deinem Rahmen. Die Browser-Warnung \u201eNicht sicher\u201c ist normal \u2014 es werden keine Daten ins Internet gesendet.',
+                ha_header: 'Home Assistant (MQTT)', ha_enable: 'Rahmen \u00fcber Home Assistant steuern',
+                ha_save: 'Home Assistant speichern',
+                connect_header: 'mimir Connect (Fotos aus der Ferne)',
+                connect_enable: 'Erlaube anderen, von \u00fcberall Fotos an diesen Rahmen zu senden',
+                connect_save: 'Connect speichern',
             }
         };
-        var lang = localStorage.getItem('frame-language') || 'en';
+        var lang = localStorage.getItem('frame-language') || 'de';
         function t(k) { return (i18n[lang] || i18n.en)[k] || k; }
 
         function applyLang() {
@@ -279,6 +292,13 @@
             document.getElementById('r-add-nc').textContent = t('add_nc');
             document.getElementById('r-save').textContent = t('save');
             document.getElementById('sync-btn').textContent = t('sync_now');
+            document.getElementById('r-note').textContent = t('note');
+            document.getElementById('r-ha-header').textContent = t('ha_header');
+            document.getElementById('r-ha-enable').textContent = t('ha_enable');
+            document.getElementById('r-ha-save').textContent = t('ha_save');
+            document.getElementById('r-connect-header').textContent = t('connect_header');
+            document.getElementById('r-connect-enable').textContent = t('connect_enable');
+            document.getElementById('r-connect-save').textContent = t('connect_save');
         }
         applyLang();
 

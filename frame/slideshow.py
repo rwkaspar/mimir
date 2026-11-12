@@ -95,14 +95,14 @@ class NativeSlideshow:
 
     def _photo_seconds(self):
         ss = self._cfg().get('slideshow', {}) or {}
-        # Accept a few likely keys; default 8s.
+        # Accept a few likely keys; default 30s (a calm pace for a photo frame).
         for k in ('interval', 'duration', 'photo_seconds', 'interval_seconds'):
             if k in ss:
                 try:
                     return max(2, int(ss[k]))
                 except (TypeError, ValueError):
                     pass
-        return 8
+        return 30
 
     def _blur_radius(self):
         photos = self._cfg().get('photos', {}) or {}
@@ -250,6 +250,95 @@ class NativeSlideshow:
         except Exception as e:
             logger.warning("Render failed for %s: %s", src, e)
             return False
+
+    # --- clock / date overlay (photos only) ---
+
+    _WDAYS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+    _MONTHS = ['Jan', 'Feb', 'März', 'Apr', 'Mai', 'Jun',
+               'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez']
+
+    def _clock_cfg(self):
+        c = self._cfg().get('clock', {}) or {}
+        return {
+            'enabled': bool(c.get('enabled', False)),
+            'size': c.get('size', 'm') if c.get('size') in ('s', 'm', 'l') else 'm',
+            'position': c.get('position', 'br') if c.get('position') in
+                        ('tl', 'tr', 'bl', 'br') else 'br',
+            'show_date': bool(c.get('show_date', True)),
+        }
+
+    def _clock_lines(self, cfg):
+        t = time.localtime()
+        lines = [time.strftime('%H:%M', t)]
+        if cfg['show_date']:
+            lines.append('%s, %d. %s' % (self._WDAYS[t.tm_wday], t.tm_mday,
+                                         self._MONTHS[t.tm_mon - 1]))
+        return lines
+
+    def _overlay_clock(self, base_raw, cfg=None):
+        """Composite the clock/date onto a copy of the clean photo (base_raw, the
+        RGB565 the panel is currently showing) and push it to fb0. The base file
+        is never modified, so each minute's refresh redraws from the clean photo
+        (no text stacking). Drawn in LOGICAL orientation then rotated into the
+        native framebuffer — same pipeline as photos and the hold ring. Photos
+        only; over video kmssink owns the display."""
+        cfg = cfg or self._clock_cfg()
+        if not cfg['enabled'] or not base_raw or not os.path.exists(base_raw):
+            return
+        try:
+            from PIL import Image, ImageDraw
+            import numpy as np
+            vert = self._orientation() == 'vertical'
+            data = open(base_raw, 'rb').read()
+            a = np.frombuffer(data, dtype='<u2').astype(np.uint32)
+            a = a[:self.fb_w * self.fb_h].reshape(self.fb_h, self.fb_w)
+            r = ((a >> 11) & 0x1F) << 3
+            g = ((a >> 5) & 0x3F) << 2
+            b = (a & 0x1F) << 3
+            im = Image.fromarray(np.dstack([r, g, b]).astype('uint8'), 'RGB')
+            if vert:
+                im = im.rotate(-90, expand=True)      # native -> logical portrait
+            self._draw_clock(im, cfg)
+            if vert:
+                im = im.rotate(90, expand=True)       # logical -> native landscape
+            arr = np.asarray(im, dtype=np.uint16)
+            rr, gg, bb = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+            packed = (((rr & 0xF8) << 8) | ((gg & 0xFC) << 3) | (bb >> 3)).astype('<u2')
+            self._fb_write_bytes(packed.tobytes())
+        except Exception as e:
+            logger.debug('clock overlay failed: %s', e)
+
+    def _draw_clock(self, im, cfg):
+        from PIL import ImageDraw
+        d = ImageDraw.Draw(im)
+        lw, lh = im.size
+        base = min(lw, lh)
+        sizes = {'s': 0.052, 'm': 0.075, 'l': 0.10}
+        fs = max(20, int(base * sizes[cfg['size']]))
+        try:
+            from frame import native_ui
+            time_font = native_ui.FbCanvas.font(fs)
+            date_font = native_ui.FbCanvas.font(max(14, int(fs * 0.5)))
+        except Exception:
+            return
+        lines = self._clock_lines(cfg)
+        margin = int(base * 0.045)
+        pos = cfg['position']
+        right = pos in ('tr', 'br')
+        bottom = pos in ('bl', 'br')
+        x = (lw - margin) if right else margin
+        anchor_h = 'r' if right else 'l'
+        # Stack time (big) then date (small). Anchor the block to the chosen edge.
+        fonts = [time_font] + ([date_font] if len(lines) > 1 else [])
+        heights = [f.getbbox(t)[3] - f.getbbox(t)[1] for f, t in zip(fonts, lines)]
+        gap = int(fs * 0.12)
+        block_h = sum(heights) + gap * (len(lines) - 1)
+        y = (lh - margin - block_h) if bottom else margin
+        for f, text, h in zip(fonts, lines, heights):
+            for dx, dy, col in ((2, 2, (0, 0, 0)), (0, 0, (255, 255, 255))):
+                d.text((x + dx, y + dy), text, font=f, fill=col,
+                       anchor=anchor_h + 'a')
+            y += h + gap
 
     def _play_video(self, path):
         self._showing_photo = False     # over video the fb0 ring is invisible
@@ -626,6 +715,9 @@ class NativeSlideshow:
         self._hold_bg = None
         if had_bg and self._showing_photo and self._cur_fb_raw:
             self._fb_write_file(self._cur_fb_raw)   # restore the clean photo
+            clk = self._clock_cfg()
+            if clk['enabled']:
+                self._overlay_clock(self._cur_fb_raw, clk)   # and its clock
 
     def _hold_overlay(self):
         """A hold happened over video: the player has torn down, so fb0 is ours.
@@ -734,6 +826,9 @@ class NativeSlideshow:
                 self._write_fb(raw)
                 self._showing_photo = True     # enable hot-corner ring over it
                 self._hold_req.clear()         # photo path draws directly, no reveal
+                clk = self._clock_cfg()
+                if clk['enabled']:
+                    self._overlay_clock(raw, clk)
                 # While this photo is up, render the NEXT photo into the other buf.
                 nxt_item = self._next_photo(items, i)
                 pending = None
@@ -741,7 +836,26 @@ class NativeSlideshow:
                     if self._render_photo(nxt_item, nxt):
                         pending = (nxt, nxt_item)
                     cur, nxt = nxt, cur  # swap buffers
-                self._wait(self._photo_seconds())
+                self._wait_photo(self._photo_seconds(), raw)
+
+    def _wait_photo(self, seconds, base_raw):
+        """Hold the current photo for `seconds`, but keep the clock current: when
+        the wall-clock minute rolls over, redraw the clock from the clean base.
+        Returns early on stop / menu / hold, exactly like _wait(). While the
+        hot-corner hold is drawing its ring we skip the refresh so the two don't
+        fight over fb0."""
+        end = time.time() + seconds
+        last_min = time.localtime().tm_min
+        while time.time() < end:
+            if self._stop.is_set() or self._menu_req.is_set() or self._hold_req.is_set():
+                return
+            m = time.localtime().tm_min
+            if m != last_min:
+                last_min = m
+                clk = self._clock_cfg()
+                if clk['enabled'] and self._showing_photo and not self._hold_req.is_set():
+                    self._overlay_clock(base_raw, clk)
+            time.sleep(0.1)
 
     def _next_photo(self, items, i):
         for j in range(i + 1, len(items)):

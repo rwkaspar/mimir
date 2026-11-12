@@ -185,6 +185,7 @@ class Widget:
         self.key = key
         self.kind = kind
         self.rect = None
+        self.disabled = False      # greyed + inert (e.g. schedule rows when sleep off)
 
     def hit(self, x, y):
         return _hit(self.rect, x, y)
@@ -216,10 +217,14 @@ class Row(Widget):
             fill, tcol = DANGER, ACCENT_FG
         elif self.kind == 'back':
             fill, tcol = CARD, MUTED
+        if self.disabled:                       # inert row: flat + dimmed
+            fill, tcol = CARD, (96, 102, 110)
         d.rounded_rectangle(self.rect, radius=12, fill=fill)
         pad = int((y1 - y0) * 0.32)
         d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font, fill=tcol,
                anchor='lm')
+        if self.disabled:
+            return
         if self.value is not None:
             d.text((x1 - pad, (y0 + y1) // 2), str(self.value), font=font,
                    fill=MUTED, anchor='rm')
@@ -248,22 +253,27 @@ class Toggle(Widget):
 
     def render(self, scr, d, canvas, font):
         x0, y0, x1, y1 = self.rect
-        d.rounded_rectangle(self.rect, radius=12, fill=ROW)
+        dim = self.disabled
+        d.rounded_rectangle(self.rect, radius=12, fill=CARD if dim else ROW)
         pad = int((y1 - y0) * 0.32)
-        d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font, fill=FG,
-               anchor='lm')
+        d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font,
+               fill=(96, 102, 110) if dim else FG, anchor='lm')
         on = bool(self.get())
         ph = min(int((y1 - y0) * 0.44), 44)     # compact switch, capped height
         pw = int(ph * 1.9)
         px1 = x1 - pad
         px0 = px1 - pw
         pcy = (y0 + y1) // 2
-        track = ACCENT if on else (70, 78, 90)
+        if dim:
+            track = (46, 51, 59)
+        else:
+            track = ACCENT if on else (70, 78, 90)
         d.rounded_rectangle((px0, pcy - ph // 2, px1, pcy + ph // 2),
                             radius=ph // 2, fill=track)
         kr = ph // 2 - 3
         kx = px1 - kr - 3 if on else px0 + kr + 3
-        d.ellipse((kx - kr, pcy - kr, kx + kr, pcy + kr), fill=(255, 255, 255))
+        knob = (120, 126, 134) if dim else (255, 255, 255)
+        d.ellipse((kx - kr, pcy - kr, kx + kr, pcy + kr), fill=knob)
 
     def tap(self, scr, x, y):
         try:
@@ -286,9 +296,13 @@ class Stepper(Widget):
 
     def render(self, scr, d, canvas, font):
         x0, y0, x1, y1 = self.rect
-        d.rounded_rectangle(self.rect, radius=12, fill=ROW)
+        dim = self.disabled
+        lbl_col = (96, 102, 110) if dim else FG
+        btn_fill = (46, 51, 59) if dim else (70, 78, 90)
+        arm_col = (96, 102, 110) if dim else FG
+        d.rounded_rectangle(self.rect, radius=12, fill=CARD if dim else ROW)
         pad = int((y1 - y0) * 0.32)
-        d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font, fill=FG,
+        d.text((x0 + pad, (y0 + y1) // 2), self.label, font=font, fill=lbl_col,
                anchor='lm')
         bs = int((y1 - y0) * 0.66)
         cy = (y0 + y1) // 2
@@ -297,15 +311,15 @@ class Stepper(Widget):
         val_w = int(bs * 2.4)
         self._minus = (pb1 - bs - val_w - bs, cy - bs // 2, pb1 - bs - val_w, cy + bs // 2)
         for rect, plus in ((self._minus, False), (self._plus, True)):
-            d.rounded_rectangle(rect, radius=10, fill=(70, 78, 90))
+            d.rounded_rectangle(rect, radius=10, fill=btn_fill)
             mx = (rect[0] + rect[2]) // 2
             my = (rect[1] + rect[3]) // 2
             arm = int((rect[2] - rect[0]) * 0.26)
-            d.line((mx - arm, my, mx + arm, my), fill=FG, width=3)   # minus bar
+            d.line((mx - arm, my, mx + arm, my), fill=arm_col, width=3)  # minus bar
             if plus:
-                d.line((mx, my - arm, mx, my + arm), fill=FG, width=3)  # vertical
+                d.line((mx, my - arm, mx, my + arm), fill=arm_col, width=3)  # vertical
         d.text(((self._minus[2] + self._plus[0]) // 2, cy), self.fmt(),
-               font=font, fill=FG, anchor='mm')
+               font=font, fill=lbl_col, anchor='mm')
 
     def tap(self, scr, x, y):
         try:
@@ -384,14 +398,21 @@ class Days(Widget):
         cw = (x1 - x0 - gap * (n - 1)) // n
         self._cells = []
         sfont = canvas.font(max(14, (y1 - y0) // 3))
+        dim = self.disabled
         for i in range(n):
             cx0 = x0 + i * (cw + gap)
             rect = (cx0, y0, cx0 + cw, y1)
             self._cells.append(rect)
             on = self._JS[i] in active
-            d.rounded_rectangle(rect, radius=10, fill=ACCENT if on else ROW)
+            if dim:
+                cell_fill = (46, 51, 59) if on else CARD   # keep the shape, no blue
+                cell_txt = (96, 102, 110)
+            else:
+                cell_fill = ACCENT if on else ROW
+                cell_txt = ACCENT_FG if on else MUTED
+            d.rounded_rectangle(rect, radius=10, fill=cell_fill)
             d.text(((cx0 + cx0 + cw) // 2, (y0 + y1) // 2), self._LABELS[i],
-                   font=sfont, fill=ACCENT_FG if on else MUTED, anchor='mm')
+                   font=sfont, fill=cell_txt, anchor='mm')
 
     def tap(self, scr, x, y):
         for i, rect in enumerate(self._cells):
@@ -559,8 +580,11 @@ class Screen:
             pref = [p * scale for p in pref]
             gap = int(gap * scale)
             y = top
-        else:                                      # room to spare -> centre
-            y = top + (avail - total) / 2.0
+        else:                                      # room to spare -> top-align
+            # Every screen starts its content at the same top edge (calmer, and
+            # consistent across screens with few vs. many rows) rather than
+            # floating a short list to the vertical centre.
+            y = top
         row_font = canvas.font(max(17, ph // 28))
         for w, h in zip(self._widgets, pref):
             w.rect = (x0, int(y), x0 + col_w, int(y + h))
@@ -578,6 +602,8 @@ class Screen:
             return self.back_target()
         for w in self._widgets:
             if w.hit(x, y):
+                if getattr(w, 'disabled', False):
+                    return None           # greyed row: inert
                 self.hit_rect = w.rect
                 return w.tap(self, x, y)
         return None
@@ -603,12 +629,52 @@ class RootMenu(Screen):
     show_back = False          # the root menu closes via ×; no back button
 
     def widgets(self):
+        # Show each row's current state inline (like "Ausrichtung: Quer"), so the
+        # whole frame can be read at a glance without opening anything. Every
+        # lookup is a localhost GET wrapped by api_get (returns None on failure);
+        # _val() turns any hiccup into a blank value, never a broken row.
+        def _val(fn):
+            try:
+                return fn()
+            except Exception:
+                return None
+
+        def wifi_val():
+            st = self.ui.api_get('/api/wifi/status') or {}
+            return st.get('ssid') or ('verbunden' if st.get('connected') else 'aus')
+
+        def display_val():
+            fs = self.ui.api_get('/api/frame/settings') or {}
+            o = (fs.get('frame', {}) or {}).get('orientation', 'horizontal')
+            return 'Hochkant' if o == 'vertical' else 'Quer'
+
+        def sleep_val():
+            s = self.ui.api_get('/schedule') or {}
+            if not s.get('enabled'):
+                return 'aus'
+            return '%s–%s' % (s.get('off_time', '22:00'), s.get('on_time', '07:00'))
+
+        def slideshow_val():
+            fs = self.ui.api_get('/api/frame/settings') or {}
+            iv = (fs.get('slideshow', {}) or {}).get('interval', 30)
+            return '%ss' % int(iv or 30)
+
+        def albums_val():
+            data = self.ui.api_get('/api/album_names') or {}
+            n = sum(len(src) for src in data.values() if isinstance(src, dict))
+            return str(n)
+
         return [
-            Row('wifi', 'WLAN', target=lambda: WifiScreen(self.ui)),
-            Row('display', 'Anzeige', target=lambda: DisplayScreen(self.ui)),
-            Row('sleep', 'Schlaf', target=lambda: SleepScreen(self.ui)),
-            Row('slideshow', 'Slideshow', target=lambda: SlideshowScreen(self.ui)),
-            Row('albums', 'Fotoalben', target=lambda: AlbumsScreen(self.ui)),
+            Row('wifi', 'WLAN', target=lambda: WifiScreen(self.ui),
+                value=_val(wifi_val)),
+            Row('display', 'Anzeige', target=lambda: DisplayScreen(self.ui),
+                value=_val(display_val)),
+            Row('sleep', 'Schlaf', target=lambda: SleepScreen(self.ui),
+                value=_val(sleep_val)),
+            Row('slideshow', 'Slideshow', target=lambda: SlideshowScreen(self.ui),
+                value=_val(slideshow_val)),
+            Row('albums', 'Fotoalben', target=lambda: AlbumsScreen(self.ui),
+                value=_val(albums_val)),
             Row('system', 'System', target=lambda: SystemScreen(self.ui)),
         ]
 
@@ -654,11 +720,15 @@ class DisplayScreen(Screen):
 
         current = self.state['orientation']
         other = 'vertical' if current == 'horizontal' else 'horizontal'
+        clk = self.ui.api_get('/api/frame/settings') or {}
+        clock_on = bool((clk.get('clock', {}) or {}).get('enabled', False))
         return [
             Slider('bright', 'Helligkeit', lambda: self.state['brightness'], set_bright),
             Row('orient', 'Ausrichtung',
                 target=lambda: OrientationConfirmScreen(self.ui, other),
                 value=('Hochkant' if current == 'vertical' else 'Quer')),
+            Row('clock', 'Uhr & Datum', target=lambda: ClockScreen(self.ui),
+                value=('an' if clock_on else 'aus')),
         ]
 
 
@@ -692,6 +762,71 @@ class OrientationConfirmScreen(Screen):
         ]
 
 
+class ClockScreen(Screen):
+    """Uhr & Datum overlay settings. Ports the old browser viewer's clock
+    (on/off, size S/M/L, 4-corner position) into the native slideshow and adds a
+    date toggle. Persisted server-side via /api/clock; the slideshow reads it."""
+    title = 'Uhr & Datum'
+    state = None
+    _SIZES = ['s', 'm', 'l']
+    _SIZE_NAMES = {'s': 'Klein', 'm': 'Mittel', 'l': 'Groß'}
+    _POS = ['tl', 'tr', 'br', 'bl']
+    _POS_NAMES = {'tl': 'Oben links', 'tr': 'Oben rechts',
+                  'br': 'Unten rechts', 'bl': 'Unten links'}
+
+    def back_target(self):
+        return DisplayScreen(self.ui)
+
+    def widgets(self):
+        if self.state is None:
+            fs = self.ui.api_get('/api/frame/settings') or {}
+            c = (fs.get('clock', {}) or {})
+            self.state = {
+                'enabled': bool(c.get('enabled', False)),
+                'size': c.get('size', 'm') if c.get('size') in self._SIZES else 'm',
+                'position': c.get('position', 'br') if c.get('position') in self._POS else 'br',
+                'show_date': bool(c.get('show_date', True)),
+            }
+
+        def push():
+            self.ui.api_post('/api/clock', {k: self.state[k] for k in
+                             ('enabled', 'size', 'position', 'show_date')})
+
+        def set_enabled(v):
+            self.state['enabled'] = v
+            push()
+
+        def set_date(v):
+            self.state['show_date'] = v
+            push()
+
+        def cycle_size():
+            i = self._SIZES.index(self.state['size'])
+            self.state['size'] = self._SIZES[(i + 1) % len(self._SIZES)]
+            push()
+            return 'rerender'
+
+        def cycle_pos():
+            i = self._POS.index(self.state['position'])
+            self.state['position'] = self._POS[(i + 1) % len(self._POS)]
+            push()
+            return 'rerender'
+
+        size_row = Row('size', 'Größe', on_tap=cycle_size,
+                       value=self._SIZE_NAMES[self.state['size']])
+        pos_row = Row('pos', 'Position', on_tap=cycle_pos,
+                      value=self._POS_NAMES[self.state['position']])
+        date_row = Toggle('date', 'Datum zeigen',
+                          lambda: self.state['show_date'], set_date)
+        if not self.state['enabled']:
+            for w in (size_row, pos_row, date_row):
+                w.disabled = True
+        return [
+            Toggle('en', 'Uhr anzeigen', lambda: self.state['enabled'], set_enabled),
+            size_row, pos_row, date_row,
+        ]
+
+
 class SleepScreen(Screen):
     title = 'Schlaf'
     state = None
@@ -722,14 +857,20 @@ class SleepScreen(Screen):
             self.state['weekdays'] = lst
             push()
 
+        off = Stepper('off', 'Aus um', lambda: self.state['off_time'],
+                      lambda: shift('off_time', -30), lambda: shift('off_time', 30))
+        on = Stepper('on', 'Ein um', lambda: self.state['on_time'],
+                     lambda: shift('on_time', -30), lambda: shift('on_time', 30))
+        days = Days('days', lambda: self.state['weekdays'], set_days)
+        method = Row('method', 'Methode & Test', target=lambda: MethodScreen(self.ui))
+        # While the schedule is OFF, its times/days/method are inert: grey them
+        # out instead of showing live blue controls that do nothing.
+        if not self.state['enabled']:
+            for w in (off, on, days, method):
+                w.disabled = True
         return [
             Toggle('en', 'Schlafmodus', lambda: self.state['enabled'], set_enabled),
-            Stepper('off', 'Aus um', lambda: self.state['off_time'],
-                    lambda: shift('off_time', -30), lambda: shift('off_time', 30)),
-            Stepper('on', 'Ein um', lambda: self.state['on_time'],
-                    lambda: shift('on_time', -30), lambda: shift('on_time', 30)),
-            Days('days', lambda: self.state['weekdays'], set_days),
-            Row('method', 'Methode & Test', target=lambda: MethodScreen(self.ui)),
+            off, on, days, method,
             Row('now', 'Jetzt schlafen', target=lambda: SleepTimerScreen(self.ui),
                 kind='primary'),
         ]
@@ -800,35 +941,60 @@ class SlideshowScreen(Screen):
     def widgets(self):
         if self.state is None:
             fs = self.ui.api_get('/api/frame/settings') or {}
-            iv = (fs.get('slideshow', {}) or {}).get('interval', 10)
-            self.state = {'interval': int(iv or 10)}
+            iv = (fs.get('slideshow', {}) or {}).get('interval', 30)
+            self.state = {'interval': int(iv or 30)}
 
         def shift(delta):
-            self.state['interval'] = max(10, min(3600, self.state['interval'] + delta))
+            self.state['interval'] = max(5, min(3600, self.state['interval'] + delta))
             self.ui.api_post('/api/interval', {'interval': self.state['interval']})
 
-        st = self.ui.api_get('/sync/status') or {}
-        running = st.get('running')
         return [
             Stepper('iv', 'Intervall', lambda: '%ds' % self.state['interval'],
                     lambda: shift(-5), lambda: shift(5)),
-            Row('sync', 'Jetzt synchronisieren',
-                on_tap=self.act('/sync/trigger', result='rerender'),
-                value=('läuft …' if running else None), kind='primary'),
         ]
 
 
 class AlbumsScreen(Screen):
     title = 'Fotoalben'
 
+    @staticmethod
+    def _ago(ts):
+        """A friendly 'last loaded' label from an epoch timestamp."""
+        if not ts:
+            return 'noch nie'
+        try:
+            delta = time.time() - float(ts)
+        except (TypeError, ValueError):
+            return '—'
+        if delta < 90:
+            return 'gerade eben'
+        if delta < 3600:
+            return 'vor %d Min' % int(delta // 60)
+        if delta < 86400:
+            return time.strftime('%H:%M Uhr', time.localtime(float(ts)))
+        return time.strftime('%d.%m.', time.localtime(float(ts)))
+
     def widgets(self):
         data = self.ui.api_get('/api/album_names') or {}
         names = [n for src in data.values() if isinstance(src, dict)
                  for n in src.values()]
-        lines = ['Alben:'] + (['• ' + n for n in names[:5]]
+        st = self.ui.api_get('/sync/status') or {}
+        running = st.get('running')
+        photos = st.get('h_photos')
+        if photos is None:
+            photos = st.get('v_photos', '?')
+        lines = ['Alben:'] + (['• ' + n for n in names[:4]]
                               or ['(keine konfiguriert)'])
+        lines.append('')
+        lines.append('Fotos: %s   Zuletzt geladen: %s'
+                     % (photos, self._ago(st.get('last_sync'))))
+        if st.get('error'):
+            lines.append('⚠ Eine Quelle ist nicht erreichbar')
         return [
-            InfoBlock('names', lines, weight=2.6),
+            InfoBlock('names', lines, weight=3.0),
+            Row('sync', 'Jetzt synchronisieren',
+                on_tap=self.act('/sync/trigger', result='rerender'),
+                value=('läuft …' if running else None), kind='primary'),
             Row('edit', 'Quellen am Handy bearbeiten',
                 target=lambda: QRScreen(self.ui, '/remote')),
         ]
@@ -838,8 +1004,29 @@ class SystemScreen(Screen):
     title = 'System'
 
     def widgets(self):
+        # Friendly top level: a one-line "all good" status, then plain actions.
+        # The technical readout (IP, version, temperatures, counts, sleep method)
+        # lives one level down under "Details" so it doesn't confront everyday
+        # users who don't need it.
+        return [
+            InfoBlock('ok', ['mimir läuft.'], weight=1.4),
+            Row('details', 'Details', target=lambda: SystemDetailsScreen(self.ui)),
+            Row('access', 'Zugang / QR', target=lambda: QRScreen(self.ui, '/remote')),
+            Row('power', 'Aus / Neustart', target=lambda: PowerScreen(self.ui),
+                kind='danger'),
+        ]
+
+
+class SystemDetailsScreen(Screen):
+    title = 'Details'
+
+    def back_target(self):
+        return SystemScreen(self.ui)
+
+    def widgets(self):
         si = self.ui.api_get('/sysinfo') or {}
         ver = self.ui.api_get('/api/version') or {}
+        fs = self.ui.api_get('/api/frame/settings') or {}
         ips = si.get('ips', []) or []
         lines = [
             'IP: ' + (ips[0] if ips else '—'),
@@ -847,23 +1034,36 @@ class SystemScreen(Screen):
             'Temp: %s °C   Disk: %s' % (si.get('cpu_temp', '?'), si.get('disk', '?')),
             'Fotos H/V: %s   Videos H/V: %s' % (si.get('photo_count', '?'),
                                                si.get('video_count', '?')),
+            'Schlaf-Methode: %s' % fs.get('sleep_method', '?'),
         ]
         return [
-            InfoBlock('si', lines, weight=2.6),
-            Row('access', 'Zugang / QR', target=lambda: QRScreen(self.ui, '/remote')),
-            Row('power', 'Aus / Neustart', target=lambda: PowerScreen(self.ui),
-                kind='danger'),
+            InfoBlock('si', lines, weight=3.0),
         ]
 
 
 class PowerScreen(Screen):
     title = 'Aus / Neustart'
 
+    def back_target(self):
+        return SystemScreen(self.ui)
+
     def widgets(self):
+        # For most people "off" means "dark screen for the night" — that's sleep,
+        # which comes back on its own. A real shutdown can only be undone by
+        # pulling and re-inserting the power plug, so it's demoted and explained.
         return [
-            Row('shutdown', 'Ausschalten', on_tap=self.act('/shutdown'), kind='danger'),
+            Row('screenoff', 'Bildschirm aus', kind='primary',
+                target=lambda: SleepTimerScreen(self.ui)),
+            InfoBlock('warn', [
+                'Ganz ausschalten trennt den',
+                'Rahmen komplett. Er geht erst',
+                'wieder an, wenn du den Stecker',
+                'ziehst und neu einsteckst.',
+            ], weight=2.4),
+            Row('shutdown', 'Ganz ausschalten', on_tap=self.act('/shutdown'),
+                kind='danger'),
             Row('reboot', 'Neustart', on_tap=self.act('/reboot')),
-            Row('back', 'Abbrechen', target=lambda: RootMenu(self.ui), kind='back'),
+            Row('back', 'Abbrechen', target=lambda: SystemScreen(self.ui), kind='back'),
         ]
 
 

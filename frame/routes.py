@@ -204,6 +204,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.handle_sync_trigger()
         elif self.path == '/api/interval':
             self.handle_save_interval()
+        elif self.path == '/api/clock':
+            self.handle_save_clock()
         elif self.path == '/api/synology':
             self.handle_save_synology_config()
         elif self.path == '/api/google_photos':
@@ -494,6 +496,7 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             'icloud': {'share_urls': cfg.get('icloud', {}).get('share_urls', [])},
             'nextcloud': {'share_urls': cfg.get('nextcloud', {}).get('share_urls', [])},
             'sleep_method': cfg.get('energy_save', {}).get('method', 'ddcci'),
+            'clock': cfg.get('clock', {}),
         }
         self._json_response(data)
 
@@ -975,8 +978,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         try:
             data = json.loads(body)
             interval = int(data.get('interval', 300))
-            if interval < 10:
-                interval = 10
+            if interval < 5:
+                interval = 5
             if interval > 3600:
                 interval = 3600
 
@@ -992,6 +995,39 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self._json_response({'ok': True, 'interval': interval})
         except Exception as e:
             logger.error(f"Failed to save interval: {e}")
+            self._json_response({'ok': False, 'error': str(e)}, 400)
+
+    def handle_save_clock(self):
+        """Save the clock/date overlay settings. Dedicated endpoint (not
+        /api/frame/settings) so a clock change never touches orientation — the
+        slideshow process reads config['clock'] on its next frame."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body)
+            size = data.get('size', 'm')
+            if size not in ('s', 'm', 'l'):
+                size = 'm'
+            position = data.get('position', 'br')
+            if position not in ('tl', 'tr', 'bl', 'br'):
+                position = 'br'
+            clock = {
+                'enabled': bool(data.get('enabled', False)),
+                'size': size,
+                'position': position,
+                'show_date': bool(data.get('show_date', True)),
+            }
+
+            with open(self.app.config_path) as f:
+                cfg = yaml.safe_load(f)
+            cfg['clock'] = clock
+            with open(self.app.config_path, 'w') as f:
+                yaml.dump(cfg, f, default_flow_style=False)
+            self.app.config['clock'] = clock   # keep in-memory copy in sync
+
+            self._json_response({'ok': True, 'clock': clock})
+        except Exception as e:
+            logger.error(f"Failed to save clock settings: {e}")
             self._json_response({'ok': False, 'error': str(e)}, 400)
 
     def handle_save_orientation(self):

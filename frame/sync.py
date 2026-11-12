@@ -52,6 +52,7 @@ class PhotoSyncer:
         self._phase = 'idle'
         self._progress = {}
         self._last_error = None
+        self._last_sync_at = None   # epoch of the last SUCCESSFUL sync (for the UI)
         self._thread = None
         self._restart_requested = False
         self._video_gate = None
@@ -171,6 +172,7 @@ class PhotoSyncer:
                 'h_photos': h_count,
                 'v_photos': v_count,
                 'error': self._last_error,
+                'last_sync': self._last_sync_at,
             }
             status.update(self._progress)
 
@@ -600,6 +602,8 @@ class PhotoSyncer:
             db.record_run(len(all_items), downloaded, processed, True)
             elapsed = time.time() - t_start
             logger.info(f"Sync done: {processed}/{total} new photos in {elapsed:.1f}s")
+            self._last_sync_at = time.time()   # mark a clean, completed run
+            self._last_error = None
 
             # Remove default placeholder photos once real media exists
             for orient in ('horizontal', 'vertical'):
