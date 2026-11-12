@@ -801,10 +801,41 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         self._json_response({'ok': True})
 
     def handle_sleep(self):
-        """Put the display to sleep on demand (manual / Home Assistant 'off')."""
+        """Put the display to sleep on demand (manual / Home Assistant 'off').
+
+        Optional JSON body for the on-panel sleep timer:
+          {"minutes": N}        -> auto-wake after N minutes
+          {"until_schedule": true} -> auto-wake at the next scheduled 'on' time
+        No body -> sleep until an explicit wake (touch/web/HA)."""
+        minutes = None
+        try:
+            length = int(self.headers.get('Content-Length', 0) or 0)
+            if length:
+                data = json.loads(self.rfile.read(length) or b'{}')
+                es = self.app.energy_save if self.app else None
+                if data.get('until_schedule') and es is not None:
+                    minutes = self._minutes_until(getattr(es, 'on_time', '07:00'))
+                elif data.get('minutes') is not None:
+                    minutes = max(1, int(data['minutes']))
+        except Exception as e:
+            logger.warning("sleep body parse failed: %s", e)
         if self.app and self.app.energy_save:
-            self.app.energy_save.sleep_now()
-        self._json_response({'ok': True})
+            self.app.energy_save.sleep_now(wake_after_minutes=minutes)
+        self._json_response({'ok': True, 'wake_after_minutes': minutes})
+
+    @staticmethod
+    def _minutes_until(hhmm):
+        """Whole minutes from now until the next occurrence of 'HH:MM'."""
+        from datetime import datetime, timedelta
+        try:
+            h, m = (int(x) for x in str(hhmm).split(':'))
+        except Exception:
+            return None
+        now = datetime.now()
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return max(1, int((target - now).total_seconds() // 60))
 
     def serve_mqtt_config(self):
         """Serve the MQTT/Home Assistant settings + live connection status."""

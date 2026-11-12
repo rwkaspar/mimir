@@ -730,7 +730,8 @@ class SleepScreen(Screen):
                     lambda: shift('on_time', -30), lambda: shift('on_time', 30)),
             Days('days', lambda: self.state['weekdays'], set_days),
             Row('method', 'Methode & Test', target=lambda: MethodScreen(self.ui)),
-            Row('now', 'Jetzt schlafen', on_tap=self.act('/sleep'), kind='primary'),
+            Row('now', 'Jetzt schlafen', target=lambda: SleepTimerScreen(self.ui),
+                kind='primary'),
         ]
 
 
@@ -761,8 +762,34 @@ class MethodScreen(Screen):
             Row('test', 'Testen (8s)',
                 on_tap=self.act('/api/sleep/test', {'method': self.state['method']}),
                 kind='primary'),
-            Row('sleepnow', 'Jetzt schlafen', on_tap=self.act('/sleep')),
-            Row('wakenow', 'Jetzt wecken', on_tap=self.act('/wake')),
+            Row('sleepnow', 'Jetzt schlafen',
+                target=lambda: SleepTimerScreen(self.ui)),
+        ]
+
+
+class SleepTimerScreen(Screen):
+    """Pick how long to sleep now; the frame auto-wakes afterwards.
+
+    Touch-to-wake is unreliable on this panel (the DDC standby drops the touch
+    USB), so a manual sleep always arms a timer instead of relying on a tap to
+    come back. 'Bis HH:MM' sleeps until the scheduled 'on' time."""
+    title = 'Jetzt schlafen'
+
+    def back_target(self):
+        return SleepScreen(self.ui)
+
+    def widgets(self):
+        s = self.ui.api_get('/schedule') or {}
+        on_time = s.get('on_time', '07:00')
+        return [
+            Row('m30', '30 Minuten', on_tap=self.act('/sleep', {'minutes': 30})),
+            Row('h1', '1 Stunde', on_tap=self.act('/sleep', {'minutes': 60})),
+            Row('h2', '2 Stunden', on_tap=self.act('/sleep', {'minutes': 120})),
+            Row('h4', '4 Stunden', on_tap=self.act('/sleep', {'minutes': 240})),
+            Row('until', 'Bis %s (Zeitplan)' % on_time,
+                on_tap=self.act('/sleep', {'until_schedule': True})),
+            Row('cancel', 'Abbrechen', target=lambda: SleepScreen(self.ui),
+                kind='back'),
         ]
 
 

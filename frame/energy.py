@@ -139,6 +139,7 @@ class EnergySaveManager:
         # configured off-window — otherwise a manual sleep is undone within one
         # 30s _check() tick. Cleared on any wake.
         self._manual_sleep = False
+        self._wake_timer = None   # threading.Timer for an auto-wake sleep timer
         self._wake_event = threading.Event()
         self._healing = False   # a wake-healer thread is retrying a dropped panel
         # Sleep method from config
@@ -202,16 +203,48 @@ class EnergySaveManager:
 
     def wake_display(self):
         """Wake display immediately (runs the heavy wake off-thread)."""
+        self._cancel_wake_timer()   # an explicit wake cancels a pending timer
         if self.sleeping:
             threading.Thread(target=lambda: self._set_sleep(False), daemon=True).start()
 
-    def sleep_now(self):
-        """Put the display to sleep immediately (HA/manual 'off')."""
+    def sleep_now(self, wake_after_minutes=None):
+        """Put the display to sleep immediately (HA/manual 'off').
+
+        wake_after_minutes: if given (>0), auto-wake after that many minutes (the
+        on-panel sleep timer). Touch-to-wake is NOT reliable on this unit — the
+        DDC standby drops the touch USB entirely — so a manual sleep arms a timer
+        to come back on its own. An earlier explicit wake cancels it.
+        """
         if not self.sleeping:
             # Mark this as a manual sleep so the scheduler's _check() loop does
             # not immediately wake it back up when we're outside the off-window.
             self._manual_sleep = True
+            self._cancel_wake_timer()
+            if wake_after_minutes and wake_after_minutes > 0:
+                t = threading.Timer(float(wake_after_minutes) * 60.0,
+                                    self._timed_wake)
+                t.daemon = True
+                self._wake_timer = t
+                t.start()
+                logger.info("Manual sleep, auto-wake in %s min",
+                            wake_after_minutes)
             threading.Thread(target=lambda: self._set_sleep(True), daemon=True).start()
+
+    def _timed_wake(self):
+        """Fired by the sleep timer: wake unless already woken."""
+        self._wake_timer = None
+        if self.sleeping:
+            logger.info("Sleep timer elapsed — waking")
+            self.wake_display()
+
+    def _cancel_wake_timer(self):
+        t = self._wake_timer
+        self._wake_timer = None
+        if t is not None:
+            try:
+                t.cancel()
+            except Exception:
+                pass
 
     def set_brightness(self, value):
         """Set the display backlight brightness (0-100) via DDC/CI (VCP 10)."""
