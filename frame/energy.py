@@ -580,7 +580,10 @@ class EnergySaveManager:
 
     def _check(self):
         if not self.enabled:
-            if self.sleeping:
+            # Energy-save schedule is off. Wake a sleep the SCHEDULE started, but
+            # never undo a manual/on-demand sleep: "Jetzt schlafen" / HA-off must
+            # stay asleep until an explicit wake even with the schedule disabled.
+            if self.sleeping and not self._manual_sleep:
                 self._set_sleep(False)
             return
         should_sleep = self._in_off_period()
