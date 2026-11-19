@@ -9,8 +9,8 @@ One source of truth for the self-drawing splash, used by two surfaces:
     writes it to /dev/fb0 as the cold-boot splash before the first photo.
 
 The mark is the mimir "window" (rounded rect + two muntins) drawn as one pen
-stroke that a bright dot traces, followed by the "mimir" wordmark wiped in left
--> right. Geometry is defined in the logo's native 520x390 space (matching
+stroke that a bright dot traces; the "mimir" wordmark below it is static (always
+shown). Geometry is defined in the logo's native 520x390 space (matching
 imaging/plymouth/photoframe/logo.svg) and scaled to the requested tile.
 
 Everything is drawn on a transparent RGBA tile sized 520:390; callers paste it
@@ -175,22 +175,12 @@ def render_tile(tile_w, progress, *, supersample=2, pad=None):
     for poly in drawn:
         _draw_polyline(d, poly, s, ox, oy, width, FG)
 
-    # --- 2. the wordmark, wiped in left -> right after the icon ---
-    if progress > _ICON_END:
-        word_frac = (progress - _ICON_END) / (1.0 - _ICON_END)
-        word_frac = max(0.0, min(1.0, word_frac))
-        wimg = Image.new('RGBA', (W, H), (0, 0, 0, 0))
-        wd = ImageDraw.Draw(wimg)
-        f = _font(max(8, int(WORD_SIZE * s)))
-        tx = ox + (VIEW_W / 2) * s
-        ty = oy + WORD_BASELINE * s
-        wd.text((tx, ty), WORD, font=f, fill=FG, anchor='ms')   # middle/baseline
-        bbox = wimg.getbbox()
-        if bbox:
-            cut = bbox[0] + int((bbox[2] - bbox[0]) * word_frac)
-            if cut < bbox[2]:                     # mask off the not-yet-written tail
-                wimg.paste((0, 0, 0, 0), (cut, 0, W, H))
-            img.alpha_composite(wimg)
+    # --- 2. the wordmark — static: always shown, full opacity, un-animated.
+    # Only the window mark above it is "drawn" by the dot.
+    f = _font(max(8, int(WORD_SIZE * s)))
+    tx = ox + (VIEW_W / 2) * s
+    ty = oy + WORD_BASELINE * s
+    d.text((tx, ty), WORD, font=f, fill=FG, anchor='ms')   # middle/baseline
 
     # --- 3. the pen dot (with a soft glow), fading out near the end ---
     if head is not None and progress < _DOT_FADE[1]:
