@@ -771,6 +771,61 @@ class NativeSlideshow:
             time.sleep(0.03)
         logger.info("Settings menu closed, resuming slideshow")
 
+    # --- boot splash ---
+
+    def _boot_splash_enabled(self):
+        """True only on a cold boot: the "dot draws the mimir logo" splash is a
+        welcome, not something to replay on every service restart (e.g. after a
+        sleep-wake, which restarts this daemon). Gated on a low system uptime so
+        it runs once at power-on. `slideshow.boot_splash: false` disables it."""
+        ss = self._cfg().get('slideshow', {}) or {}
+        if not ss.get('boot_splash', True):
+            return False
+        try:
+            with open('/proc/uptime') as f:
+                return float(f.read().split()[0]) < 150.0
+        except Exception:
+            return False
+
+    def _boot_splash(self):
+        """Animate the mimir logo being drawn by a bright dot on /dev/fb0, then
+        hold the finished mark. Bridges the gap between Plymouth quitting and the
+        first photo. Logical-then-rotate for vertical, same as the clock/photo
+        path. Aborts immediately on stop or a menu request."""
+        if not self._boot_splash_enabled():
+            return
+        try:
+            from PIL import Image
+            import numpy as np
+            from frame import logo_anim
+            vert = self._orientation() == 'vertical'
+            lw, lh = (self.fb_h, self.fb_w) if vert else (self.fb_w, self.fb_h)
+            tile_w = max(120, int(min(lw, lh) * 0.5))
+            DRAW, HOLD = 2.2, 0.7
+            logger.info("Boot splash: drawing mimir logo")
+            start = time.time()
+            while not self._stop.is_set() and not self._menu_req.is_set():
+                el = time.time() - start
+                if el < DRAW:
+                    p = el / DRAW
+                elif el < DRAW + HOLD:
+                    p = 1.0
+                else:
+                    break
+                tile = logo_anim.render_tile(tile_w, p, supersample=2)
+                canvas = Image.new('RGB', (lw, lh), (0, 0, 0))
+                canvas.paste(tile, ((lw - tile.width) // 2,
+                                    (lh - tile.height) // 2), tile)
+                if vert:
+                    canvas = canvas.rotate(90, expand=True)   # logical -> native
+                arr = np.asarray(canvas, dtype=np.uint16)
+                rr, gg, bb = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+                packed = (((rr & 0xF8) << 8) | ((gg & 0xFC) << 3) |
+                          (bb >> 3)).astype('<u2')
+                self._fb_write_bytes(packed.tobytes())
+        except Exception as e:
+            logger.debug('boot splash failed: %s', e)
+
     # --- main loop ---
 
     def stop(self):
@@ -779,6 +834,7 @@ class NativeSlideshow:
     def run(self):
         logger.info("Native slideshow starting")
         self._start_touch()
+        self._boot_splash()
         buf_a = '/tmp/slideshow_a.raw'
         buf_b = '/tmp/slideshow_b.raw'
         cur, nxt = buf_a, buf_b

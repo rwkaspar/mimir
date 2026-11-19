@@ -1,35 +1,46 @@
-# Photo Frame boot splash: centered logo with a rotating spinner.
+# mimir boot splash: a bright dot draws the mimir logo, on a black screen.
 #
-# The panel is always driven in its native landscape framebuffer; for a
-# vertically-mounted frame the installer pre-rotates logo.png and flips the
-# spinner offset, so the splash reads upright in either orientation. The
-# @SPIN_DX@/@SPIN_DY@ placeholders are filled in by install_bootsplash.sh.
-
-TWO_PI = 6.2831853;
+# The animation is a pre-rendered PNG frame sequence (anim/f0.png .. fN.png) —
+# the frame has no image tooling, so install_bootsplash.sh copies the frames for
+# the active orientation (the vertical set is pre-rotated). The sweep plays once
+# (dot traces the window mark, then the "mimir" wordmark wipes in), holds the
+# finished logo briefly, then loops — a calm, continuous "loading" feel for the
+# Pi's slow boot. Tunables below. Frame count is filled in by the installer.
 
 Window.SetBackgroundTopColor(0.0, 0.0, 0.0);
 Window.SetBackgroundBottomColor(0.0, 0.0, 0.0);
 
-cx = Window.GetWidth() / 2;
-cy = Window.GetHeight() / 2;
+FRAMES   = @FRAMES@;   # number of anim frames (set by install_bootsplash.sh)
+SPEED    = 2;          # refresh ticks per anim frame (higher = slower draw)
+HOLD     = 42;         # refresh ticks to hold the full logo before looping
 
-logo.image = Image("logo.png");
-logo.sprite = Sprite(logo.image);
-logo.sprite.SetX(cx - logo.image.GetWidth() / 2);
-logo.sprite.SetY(cy - logo.image.GetHeight() / 2);
+# Preload every frame once.
+for (i = 0; i < FRAMES; i++)
+    frame[i] = Image("anim/f" + i + ".png");
 
-spin.image = Image("spinner.png");
-spin.sprite = Sprite();
-spin.angle = 0.0;
-spin.cx = cx + (@SPIN_DX@);
-spin.cy = cy + (@SPIN_DY@);
+sprite = Sprite();
+idx  = 0;
+tick = 0;
+hold = 0;
 
 fun refresh_callback() {
-    spin.angle += 0.12;
-    if (spin.angle > TWO_PI) spin.angle -= TWO_PI;
-    img = spin.image.Rotate(spin.angle);
-    spin.sprite.SetImage(img);
-    spin.sprite.SetX(spin.cx - img.GetWidth() / 2);
-    spin.sprite.SetY(spin.cy - img.GetHeight() / 2);
+    if (idx < FRAMES - 1) {
+        tick++;
+        if (tick >= SPEED) { tick = 0; idx++; }
+    } else {
+        hold++;
+        if (hold >= HOLD) { hold = 0; idx = 0; }   # loop the draw-on
+    }
+    img = frame[idx];
+    sprite.SetImage(img);
+    sprite.SetX((Window.GetWidth()  - img.GetWidth())  / 2);
+    sprite.SetY((Window.GetHeight() - img.GetHeight()) / 2);
 }
 Plymouth.SetRefreshFunction(refresh_callback);
+
+# Keep the final logo on screen if the system asks Plymouth to stop animating
+# (e.g. right before hand-off), so the last thing shown is the finished mark.
+fun quit_callback() {
+    sprite.SetImage(frame[FRAMES - 1]);
+}
+Plymouth.SetQuitFunction(quit_callback);

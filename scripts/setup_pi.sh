@@ -262,6 +262,7 @@ slideshow:
   interval: 30
   fade_duration: 1.0
   transition: fade
+  boot_splash: true   # draw the mimir logo on fb0 at cold boot (before photo 1)
 clock:
   enabled: false
   size: m

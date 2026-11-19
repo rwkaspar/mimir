@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the Photo Frame Plymouth boot splash (logo + spinner).
+# Install the Photo Frame Plymouth boot splash (a dot draws the mimir logo).
 #
 # Usage: sudo install_bootsplash.sh [orientation] [config_path]
 #   orientation : "horizontal" | "vertical" (default: read from config, else horizontal)
@@ -35,19 +35,19 @@ fi
 mkdir -p "$DEST"
 cp "$SRC/photoframe.plymouth" "$DEST/"
 cp "$SRC/photoframe.script"   "$DEST/photoframe.script"
-cp "$SRC/spinner.png"         "$DEST/spinner.png"
 
-# --- Orientation: pick the pre-rotated logo + place the spinner --------------
-# Both logo variants are shipped pre-rendered so the target needs no image
-# tooling (ImageMagick/PIL are not installed on the frame).
-if [ "$ORIENTATION" = "vertical" ]; then
-    cp "$SRC/logo_vertical.png" "$DEST/logo.png"
-    SPIN_DX=420; SPIN_DY=0
-else
-    cp "$SRC/logo.png"          "$DEST/logo.png"
-    SPIN_DX=0;   SPIN_DY=400
-fi
-sed -i "s/@SPIN_DX@/${SPIN_DX}/; s/@SPIN_DY@/${SPIN_DY}/" "$DEST/photoframe.script"
+# --- Orientation: install the pre-rendered logo animation --------------------
+# The "a dot draws the mimir logo" splash ships as a flat PNG frame sequence
+# (regenerate with render_anim.py after a logo/animation change); the vertical
+# set is pre-rotated. The frame has no image tooling (ImageMagick/PIL absent),
+# so nothing is rendered here — we just copy the frames for this orientation.
+rm -rf "$DEST/anim"
+mkdir -p "$DEST/anim"
+cp "$SRC/anim/$ORIENTATION/"f*.png "$DEST/anim/"
+FRAMES="$(ls "$DEST/anim/"f*.png 2>/dev/null | wc -l)"
+[ "$FRAMES" -ge 1 ] || { echo "ERROR: no animation frames in $SRC/anim/$ORIENTATION"; exit 1; }
+sed -i "s/@FRAMES@/${FRAMES}/" "$DEST/photoframe.script"
+echo "Boot splash animation: $FRAMES frames ($ORIENTATION)"
 
 # --- Kernel cmdline: enable the splash --------------------------------------
 if [ -f "$CMDLINE" ]; then
