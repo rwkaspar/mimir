@@ -790,19 +790,47 @@ class NativeSlideshow:
     def _boot_splash(self):
         """Animate the mimir logo being drawn by a bright dot on /dev/fb0, then
         hold the finished mark. Bridges the gap between Plymouth quitting and the
-        first photo. Logical-then-rotate for vertical, same as the clock/photo
-        path. Aborts immediately on stop or a menu request."""
+        first photo. Aborts immediately on stop or a menu request.
+
+        Tuned for the Pi Zero 2 W: the logo occupies only a band of the screen,
+        so we clear to black ONCE, then each frame composites a small tile in
+        numpy and rewrites only that band's rows (a full 1920x1200 pack+write
+        per frame is ~250ms = a slideshow, not an animation). No supersampling —
+        on a 1920px panel the aliasing on a 16px stroke is not worth 10x cost."""
         if not self._boot_splash_enabled():
             return
         try:
-            from PIL import Image
             import numpy as np
             from frame import logo_anim
             vert = self._orientation() == 'vertical'
-            lw, lh = (self.fb_h, self.fb_w) if vert else (self.fb_w, self.fb_h)
-            tile_w = max(120, int(min(lw, lh) * 0.5))
-            DRAW, HOLD = 2.2, 0.7
+            tile_w = max(120, int(min(self.fb_w, self.fb_h) * 0.5))
+
+            def cell565(p):
+                """RGB565 of the logo tile at progress p, in native orientation,
+                composited over black (premultiplied alpha)."""
+                tile = logo_anim.render_tile(tile_w, p, supersample=1)
+                if vert:
+                    tile = tile.rotate(90, expand=True)   # -> native landscape
+                t = np.asarray(tile)                       # (h, w, 4)
+                a = t[:, :, 3].astype(np.uint16)
+                r = (t[:, :, 0] * a) // 255
+                g = (t[:, :, 1] * a) // 255
+                b = (t[:, :, 2] * a) // 255
+                return ((((r & 0xF8) << 8) | ((g & 0xFC) << 3) |
+                         (b >> 3)).astype('<u2'))
+
+            probe = cell565(1.0)
+            sh, sw = probe.shape
+            oy = max(0, (self.fb_h - sh) // 2)
+            ox = max(0, (self.fb_w - sw) // 2)
+            base = np.zeros((self.fb_h, self.fb_w), dtype='<u2')
+            self._fb_write_bytes(base.tobytes())           # clear screen once
+            fd = self._fb_fd()
+            r0, r1 = oy, min(self.fb_h, oy + sh)
+            cw = min(sw, self.fb_w - ox)
+
             logger.info("Boot splash: drawing mimir logo")
+            DRAW, HOLD = 2.2, 0.7
             start = time.time()
             while not self._stop.is_set() and not self._menu_req.is_set():
                 el = time.time() - start
@@ -812,17 +840,13 @@ class NativeSlideshow:
                     p = 1.0
                 else:
                     break
-                tile = logo_anim.render_tile(tile_w, p, supersample=2)
-                canvas = Image.new('RGB', (lw, lh), (0, 0, 0))
-                canvas.paste(tile, ((lw - tile.width) // 2,
-                                    (lh - tile.height) // 2), tile)
-                if vert:
-                    canvas = canvas.rotate(90, expand=True)   # logical -> native
-                arr = np.asarray(canvas, dtype=np.uint16)
-                rr, gg, bb = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
-                packed = (((rr & 0xF8) << 8) | ((gg & 0xFC) << 3) |
-                          (bb >> 3)).astype('<u2')
-                self._fb_write_bytes(packed.tobytes())
+                cell = cell565(p)
+                base[r0:r1, ox:ox + cw] = cell[:r1 - r0, :cw]
+                band = base[r0:r1, :].tobytes()            # only the logo rows
+                if fd >= 0:
+                    os.pwrite(fd, band, r0 * self.fb_w * 2)
+                else:
+                    self._fb_write_bytes(base.tobytes())
         except Exception as e:
             logger.debug('boot splash failed: %s', e)
 

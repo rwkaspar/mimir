@@ -35,41 +35,34 @@ _ICON_END = 0.70                 # icon done at 70% of the animation
 _DOT_FADE = (0.66, 0.82)        # dot fades out across this progress window
 
 
-def _rounded_rect(x, y, w, h, r, step=3.0):
+def _rounded_rect(x, y, w, h, r):
     """Perimeter of a rounded rect as a closed polyline, clockwise from the top
-    edge just right of the top-left corner (a natural pen start)."""
-    pts = []
+    edge just right of the top-left corner (a natural pen start). Straight edges
+    are 2 points (the reveal interpolates within a segment, so the dot still
+    moves smoothly); only the corner arcs are subdivided — keeps the point count
+    ~30 so live per-frame rendering on the Pi Zero stays cheap."""
+    pts = [(x + r, y)]                            # start: top edge, past corner
+    ARC = 5                                       # points per 90-degree corner
 
-    def arc(cx, cy, a0, a1):
-        length = abs(a1 - a0) * r
-        n = max(2, int(length / step))
-        for i in range(n + 1):
-            a = a0 + (a1 - a0) * i / n
+    def arc(cx, cy, a0):
+        for i in range(1, ARC + 1):
+            a = a0 + (math.pi / 2) * i / ARC
             pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
 
-    def line(x0, y0, x1, y1):
-        d = math.hypot(x1 - x0, y1 - y0)
-        n = max(1, int(d / step))
-        for i in range(1, n + 1):
-            pts.append((x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n))
-
     x1, y1 = x + w, y + h
-    pts.append((x + r, y))                       # start: top edge, past the corner
-    line(x + r, y, x1 - r, y)                     # top edge
-    arc(x1 - r, y + r, -math.pi / 2, 0)          # top-right corner
-    line(x1, y + r, x1, y1 - r)                   # right edge
-    arc(x1 - r, y1 - r, 0, math.pi / 2)          # bottom-right
-    line(x1 - r, y1, x + r, y1)                   # bottom edge
-    arc(x + r, y1 - r, math.pi / 2, math.pi)     # bottom-left
-    line(x, y1 - r, x, y + r)                      # left edge
-    arc(x + r, y + r, math.pi, math.pi * 1.5)    # top-left, back to start
+    pts.append((x1 - r, y))                       # top edge
+    arc(x1 - r, y + r, -math.pi / 2)             # top-right corner
+    pts.append((x1, y1 - r))                      # right edge
+    arc(x1 - r, y1 - r, 0)                        # bottom-right
+    pts.append((x + r, y1))                       # bottom edge
+    arc(x + r, y1 - r, math.pi / 2)              # bottom-left
+    pts.append((x, y + r))                        # left edge
+    arc(x + r, y + r, math.pi)                   # top-left, back to start
     return pts
 
 
-def _segment(x0, y0, x1, y1, step=3.0):
-    d = math.hypot(x1 - x0, y1 - y0)
-    n = max(1, int(d / step))
-    return [(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n) for i in range(n + 1)]
+def _segment(x0, y0, x1, y1):
+    return [(x0, y0), (x1, y1)]
 
 
 def _pen_path():
@@ -121,15 +114,26 @@ def _reveal(segs, frac):
     return drawn, head
 
 
+_FONT_CACHE = {}
+
+
 def _font(px):
+    f = _FONT_CACHE.get(px)
+    if f is not None:
+        return f
     from PIL import ImageFont
+    f = None
     for path in ('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
                  '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'):
         try:
-            return ImageFont.truetype(path, px)
+            f = ImageFont.truetype(path, px)
+            break
         except Exception:
             continue
-    return ImageFont.load_default()
+    if f is None:
+        f = ImageFont.load_default()
+    _FONT_CACHE[px] = f
+    return f
 
 
 def _draw_polyline(d, pts, s, ox, oy, width, fill):
@@ -199,7 +203,7 @@ def render_tile(tile_w, progress, *, supersample=2, pad=None):
         core = width * 0.75
         glow = Image.new('RGBA', (W, H), (0, 0, 0, 0))
         gd = ImageDraw.Draw(glow)
-        for rr, alpha in ((core * 2.6, 45), (core * 1.7, 90), (core, 255)):
+        for rr, alpha in ((core * 2.0, 70), (core, 255)):
             col = (DOT[0], DOT[1], DOT[2], int(alpha * a))
             gd.ellipse([hx - rr, hy - rr, hx + rr, hy + rr], fill=col)
         img.alpha_composite(glow)
