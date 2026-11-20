@@ -773,19 +773,46 @@ class NativeSlideshow:
 
     # --- boot splash ---
 
+    COLD_BOOT_MAX_UPTIME = 150.0
+
+    def _uptime(self):
+        try:
+            with open('/proc/uptime') as f:
+                return float(f.read().split()[0])
+        except Exception:
+            return None
+
     def _boot_splash_enabled(self):
         """True only on a cold boot: the "dot draws the mimir logo" splash is a
         welcome, not something to replay on every service restart (e.g. after a
         sleep-wake, which restarts this daemon). Gated on a low system uptime so
-        it runs once at power-on. `slideshow.boot_splash: false` disables it."""
+        it runs once at power-on. `slideshow.boot_splash: false` disables it.
+
+        Logs its decision — the gate is otherwise invisible and a silent skip is
+        indistinguishable from a crash."""
         ss = self._cfg().get('slideshow', {}) or {}
         if not ss.get('boot_splash', True):
+            logger.info("Boot splash: disabled by config")
             return False
-        try:
-            with open('/proc/uptime') as f:
-                return float(f.read().split()[0]) < 150.0
-        except Exception:
+        up = self._uptime()
+        if up is None or up >= self.COLD_BOOT_MAX_UPTIME:
+            logger.info("Boot splash: skip (uptime=%s, not a cold boot)", up)
             return False
+        logger.info("Boot splash: cold boot (uptime=%.0fs)", up)
+        return True
+
+    def _wait_fb_writable(self, tries=20, delay=0.2):
+        """/dev/fb0 can be briefly unwritable right after Plymouth releases the
+        DRM master; re-open it until a direct write fd is available (best effort —
+        falls back to the sudo-dd path if it never opens)."""
+        for _ in range(tries):
+            self._fbfd = None                      # drop any cached -1, re-open
+            if self._fb_fd() >= 0:
+                return True
+            if self._stop.is_set() or self._menu_req.is_set():
+                break
+            time.sleep(delay)
+        return False
 
     def _boot_splash(self):
         """Animate the mimir logo being drawn by a bright dot on /dev/fb0, then
@@ -799,6 +826,8 @@ class NativeSlideshow:
         on a 1920px panel the aliasing on a 16px stroke is not worth 10x cost."""
         if not self._boot_splash_enabled():
             return
+        logger.info("Boot splash: drawing mimir logo")
+        self._wait_fb_writable()
         try:
             import numpy as np
             from frame import logo_anim
@@ -848,7 +877,7 @@ class NativeSlideshow:
                 else:
                     self._fb_write_bytes(base.tobytes())
         except Exception as e:
-            logger.debug('boot splash failed: %s', e)
+            logger.warning('boot splash failed: %s', e, exc_info=True)
 
     # --- main loop ---
 
