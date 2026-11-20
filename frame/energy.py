@@ -143,6 +143,7 @@ class EnergySaveManager:
         self._wake_hint = None    # "HH:MM" to show on the pre-sleep splash
         self._wake_event = threading.Event()
         self._healing = False   # a wake-healer thread is retrying a dropped panel
+        self._sleep_healing = False  # a sleep-healer thread is retrying DDC standby
         # Sleep method from config
         config = app_state.config if app_state else {}
         self.method = config.get('energy_save', {}).get('method', 'ddcci')
@@ -349,11 +350,17 @@ class EnergySaveManager:
             state = self._display_is_on()
             if state is False:
                 return True
-            if state is None:
-                break  # panel unreachable → backlight already dark; don't spin
             time.sleep(2)
+        # Didn't confirm standby — either the panel still reports On (write lost
+        # on the flaky bus) or it reads as unreachable (None) during a transient
+        # DDC drop. Both can leave the backlight ON for the whole sleep, which is
+        # the recurring symptom. A single blind retry already failed, so hand off
+        # to a background healer that keeps re-issuing standby every 60s until the
+        # panel confirms Off (or the frame wakes) — the symmetric twin of the
+        # wake healer.
         logger.warning("Sleep: panel did not confirm DDC standby after retries "
-                       "(backlight may stay on) — flaky DDC bus")
+                       "(backlight may stay on) — flaky DDC bus; starting healer")
+        self._start_sleep_healer()
         return False
 
     def _start_wake_healer(self):
@@ -386,6 +393,39 @@ class EnergySaveManager:
                            "unreachable (needs physical power-cycle)")
         finally:
             self._healing = False
+
+    def _start_sleep_healer(self):
+        """Background retry loop for a panel that won't enter DDC standby (write
+        lost / bus dropped at sleep time). Re-issues the DDC standby every 60s
+        until the panel confirms Off or the frame is woken — so a flaky bus at
+        the moment of sleep no longer leaves the backlight ON all night (it comes
+        off within ~a minute instead). Symmetric twin of _start_wake_healer."""
+        if self._sleep_healing:
+            return
+        self._sleep_healing = True
+        threading.Thread(target=self._sleep_heal_loop, daemon=True).start()
+
+    def _sleep_heal_loop(self):
+        logger.warning("Sleep: backlight not confirmed off — healer will retry "
+                       "DDC standby every 60s until it goes dark")
+        try:
+            for attempt in range(1, 181):   # cap ~3h of 60s ticks
+                if not self.sleeping:
+                    return  # woken → wake path owns the panel now
+                time.sleep(60)
+                if not self.sleeping:
+                    return
+                subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '4'],
+                               capture_output=True, timeout=10)
+                if self._display_is_on() is False:
+                    logger.info("Sleep healer: backlight confirmed off after "
+                                "%d retr%s", attempt,
+                                'y' if attempt == 1 else 'ies')
+                    return
+            logger.warning("Sleep healer: gave up after ~3h, panel never "
+                           "confirmed standby")
+        finally:
+            self._sleep_healing = False
 
     def _backlight_on(self):
         """Turn on backlight using configured method."""
