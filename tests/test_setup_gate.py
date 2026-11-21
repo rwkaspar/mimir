@@ -71,3 +71,28 @@ def test_sudo_refusal_is_reported_as_config_fault_not_as_dead_panel(monkeypatch,
         assert es._display_is_on() is None
     msgs = [r.message for r in caplog.records if 'sudo refused' in r.message]
     assert len(msgs) == 1 and 'NOPASSWD' in msgs[0]
+
+
+def test_clock_overlay_for_video(tmp_path, monkeypatch):
+    """Over video the clock is blended into the stream as a cropped PNG."""
+    from PIL import Image
+    monkeypatch.setattr(NativeSlideshow, '_CLOCK_PNGS',
+                        (str(tmp_path / 'a.png'), str(tmp_path / 'b.png')))
+    for orient in ('horizontal', 'vertical'):
+        s = show(tmp_path, 'setup_complete: true\nframe: {orientation: %s}\n'
+                           'clock: {enabled: true, size: l, position: br}\n' % orient)
+        path, x, y = s._clock_overlay_png()
+        w, h = Image.open(path).size
+        assert x % 2 == 0 and y % 2 == 0
+        assert x + w <= s.fb_w and y + h <= s.fb_h          # inside the video frame
+        desc = s._video_pipeline_desc('/x/a.mp4')
+        assert 'v4l2h264dec ! gdkpixbufoverlay name=clk' in desc and desc.endswith(
+            'kmssink force-modesetting=true')
+        # consecutive renders use different files, so `location` always reloads
+        assert s._clock_overlay_png()[0] != s._clock_overlay_png()[0]
+    off = show(tmp_path, 'setup_complete: true\nclock: {enabled: false}\n')
+    assert off._clock_overlay_png() is None
+    assert 'gdkpixbufoverlay' not in off._video_pipeline_desc('/x/a.mp4')
+    broken = show(tmp_path, 'setup_complete: true\nclock: {enabled: true}\n')
+    broken._overlay_broken = True
+    assert 'gdkpixbufoverlay' not in broken._video_pipeline_desc('/x/a.mp4')

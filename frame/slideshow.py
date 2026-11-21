@@ -346,9 +346,143 @@ class NativeSlideshow:
                        anchor=anchor_h + 'a')
             y += h + gap
 
+    # --- clock over video ---
+    #
+    # While a clip plays, kmssink owns the display and fb0 (where the photo
+    # clock is drawn) is not shown. So for video the clock goes INTO the video:
+    # the same PIL rendering as the photo clock is saved as a small transparent
+    # PNG and blended onto the decoded frames by `gdkpixbufoverlay`, right before
+    # kmssink. Only the clock's bounding box is blended, so the cost per frame is
+    # tiny. Drawing it ourselves (instead of GStreamer's clockoverlay) keeps the
+    # look identical to the photo clock and lets us rotate it for a portrait
+    # mount, which pango overlays cannot do.
+
+    _CLOCK_PNGS = ('/tmp/slideshow_clock_a.png', '/tmp/slideshow_clock_b.png')
+    _clock_png_i = 0
+    _overlay_broken = False     # the overlay element failed once: play without
+
+    def _clock_overlay_png(self):
+        """Render the current clock as a cropped RGBA PNG in NATIVE (framebuffer)
+        orientation. Returns (path, x, y) — where to place it on the video — or
+        None when the clock is off. Alternates between two files so that setting
+        the element's `location` always names a new file (= a reload)."""
+        cfg = self._clock_cfg()
+        if not cfg['enabled'] or self._overlay_broken:
+            return None
+        try:
+            from PIL import Image
+            vert = self._orientation() == 'vertical'
+            lw, lh = (self.fb_h, self.fb_w) if vert else (self.fb_w, self.fb_h)
+            im = Image.new('RGBA', (lw, lh), (0, 0, 0, 0))
+            self._draw_clock(im, cfg)
+            if vert:
+                im = im.rotate(90, expand=True)       # logical -> native landscape
+            box = im.getbbox()
+            if not box:
+                return None
+            # Even offsets: the video is 4:2:0, chroma is shared by 2x2 pixels.
+            x0, y0 = box[0] & ~1, box[1] & ~1
+            self._clock_png_i ^= 1
+            path = self._CLOCK_PNGS[self._clock_png_i]
+            im.crop((x0, y0, box[2], box[3])).save(path, 'PNG')
+            return path, x0, y0
+        except Exception as e:
+            logger.warning('clock overlay render failed: %s', e)
+            return None
+
+    def _video_pipeline_desc(self, path, overlay=True):
+        """gst-launch description for playing `path` straight to the panel, with
+        the clock blended in when it is enabled."""
+        ov = self._clock_overlay_png() if overlay else None
+        clk = ''
+        if ov:
+            clk = ('gdkpixbufoverlay name=clk location=%s offset-x=%d '
+                   'offset-y=%d ! ' % ov)
+        return ('filesrc location="%s" ! qtdemux ! h264parse ! v4l2h264dec ! '
+                '%skmssink force-modesetting=true' % (path, clk))
+
+    def _refresh_clock_overlay(self, pipe):
+        """Minute rolled over mid-clip: swap in a freshly rendered clock."""
+        el = pipe.get_by_name('clk')
+        if el is None:
+            return
+        ov = self._clock_overlay_png()
+        if ov:
+            el.set_property('offset-x', ov[1])
+            el.set_property('offset-y', ov[2])
+            el.set_property('location', ov[0])
+
+    def _play_video_gi(self, path, overlay=True):
+        """Play one clip in-process (GStreamer via python-gi) so the clock
+        overlay can be updated while it plays. Returns False if the pipeline
+        errored (the caller may retry without the overlay)."""
+        import gi
+        gi.require_version('Gst', '1.0')
+        from gi.repository import Gst, GLib
+        Gst.init(None)
+        pipe = Gst.parse_launch(self._video_pipeline_desc(path, overlay))
+        gloop = GLib.MainLoop()
+        bus = pipe.get_bus()
+        bus.add_signal_watch()
+        result = {'ok': True}
+
+        def on_msg(_bus, msg):
+            if msg.type == Gst.MessageType.EOS:
+                gloop.quit()
+            elif msg.type == Gst.MessageType.ERROR:
+                err, dbg = msg.parse_error()
+                logger.error("Video gst error: %s (%s)", err, dbg)
+                result['ok'] = False
+                gloop.quit()
+
+        bus.connect('message', on_msg)
+        deadline = time.time() + self._duration(path) + 15
+        state = {'min': time.localtime().tm_min}
+
+        def tick():
+            if self._menu_req.is_set():
+                self._prep_menu()     # draw menu to fb0 BEFORE kmssink releases
+                gloop.quit()
+                return False
+            if (self._hold_req.is_set() or self._stop.is_set()
+                    or time.time() > deadline):
+                gloop.quit()
+                return False
+            m = time.localtime().tm_min
+            if m != state['min']:
+                state['min'] = m
+                self._refresh_clock_overlay(pipe)
+            return True
+
+        GLib.timeout_add(150, tick)
+        pipe.set_state(Gst.State.PLAYING)
+        try:
+            gloop.run()
+        finally:
+            pipe.set_state(Gst.State.NULL)   # clean teardown, no MMAL leak
+            bus.remove_signal_watch()
+        return result['ok']
+
     def _play_video(self, path):
         self._showing_photo = False     # over video the fb0 ring is invisible
         logger.info("Slideshow video: %s", path)
+        # Preferred: in-process pipeline (clock overlay stays current). If the
+        # overlay element is what breaks it, remember that and play without.
+        try:
+            import gi  # noqa: F401
+            if self._play_video_gi(path):
+                return
+            if (self._clock_cfg()['enabled'] and not self._overlay_broken
+                    and not (self._stop.is_set() or self._menu_req.is_set())):
+                logger.warning("Video failed with the clock overlay; "
+                               "retrying without it")
+                self._overlay_broken = True
+                if self._play_video_gi(path, overlay=False):
+                    return
+            else:
+                return
+        except Exception as e:
+            logger.warning("In-process video unavailable (%s); using gst-launch", e)
         cmd = ['gst-launch-1.0', '-q',
                'filesrc', f'location={path}', '!', 'qtdemux', '!',
                'h264parse', '!', 'v4l2h264dec', '!',
@@ -477,9 +611,8 @@ class NativeSlideshow:
 
         joined = self._build_concat(videos) or videos[0]
         start_sig = self._video_sig(videos)
-        pipe = Gst.parse_launch(
-            'filesrc location=%s ! qtdemux ! h264parse ! v4l2h264dec ! '
-            'kmssink force-modesetting=true' % joined)
+        pipe = Gst.parse_launch(self._video_pipeline_desc(joined))
+        clock_min = {'min': time.localtime().tm_min}
         gloop = GLib.MainLoop()
         bus = pipe.get_bus()
         bus.add_signal_watch()
@@ -521,6 +654,10 @@ class NativeSlideshow:
                 logger.info("Video wall: media changed, rebuilding")
                 gloop.quit()
                 return False
+            m = time.localtime().tm_min
+            if m != clock_min['min']:
+                clock_min['min'] = m
+                self._refresh_clock_overlay(pipe)
             return True
 
         GLib.timeout_add(150, tick)
