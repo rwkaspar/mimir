@@ -1190,7 +1190,7 @@ class NativeUI:
         boot default), so the slider reads the hardware directly — the frame
         user has NOPASSWD sudo for ddcutil. ~0.5s, run once when Anzeige opens."""
         try:
-            out = subprocess.run(['sudo', 'ddcutil', 'getvcp', '10'],
+            out = subprocess.run(['sudo', '-n', 'ddcutil', 'getvcp', '10'],
                                  capture_output=True, text=True, timeout=5)
             m = re.search(r'current value\s*=\s*(\d+)', out.stdout)
             if m:
@@ -1221,6 +1221,21 @@ class NativeUI:
 
 
 # --- touch input -----------------------------------------------------------
+
+def touch_present():
+    """True if a touchscreen is currently enumerated (any vendor).
+
+    The panel is optional and, on USB, comes and goes — so callers ask each
+    time instead of caching the answer."""
+    try:
+        with open('/proc/bus/input/devices') as fh:
+            for block in fh.read().split('\n\n'):
+                if 'touchscreen' in block.lower() and 'Handlers=' in block:
+                    return True
+    except Exception:
+        pass
+    return False
+
 
 # This panel: wch.cn TouchScreen on /dev/input/event2 (MT node). Raw ABS range
 # X 0..16383, Y 0..9599; linear map to the 1920x1200 panel, origin top-left

@@ -14,7 +14,7 @@ import yaml
 
 from frame.clients import (SynologyPhotosClient, GooglePhotosClient, ImmichClient,
                             ICloudSharedAlbumClient, NextcloudClient)
-from frame.services import DISPLAY_SERVICE
+from frame.services import DISPLAY_SERVICE, display_service, variant
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,12 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
     def _client_is_local(self):
         ip = self.client_address[0] if self.client_address else ''
         return ip in self.LOCAL_IPS
+
+    def _hotspot_client(self):
+        """A remote client while the frame runs its own setup hotspot."""
+        wifi = getattr(self.app, 'wifi_manager', None)
+        return (wifi is not None and getattr(wifi, 'mode', 'normal') == 'hotspot'
+                and not self._client_is_local())
 
     def _presented_token(self, parsed_path):
         """Extract a token from query string, header, or cookie."""
@@ -114,8 +120,16 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self._send_auth_required(path)
             return
         if path == '/' or path == '/index.html':
-            if self.app and self.app.wizard_mode:
+            if self._hotspot_client():
+                # A phone on the setup hotspot: Wi-Fi comes first — the wizard
+                # needs the frame on the home network (album links, sync).
+                self.serve_setup()
+            elif self.app and self.app.wizard_mode:
                 self.serve_wizard()
+            elif not self._client_is_local():
+                # A phone/PC on the LAN: the settings page, not the old on-panel
+                # browser viewer (nothing runs a browser on the panel any more).
+                self.serve_remote()
             else:
                 self.serve_viewer()
         elif path == '/wizard':
@@ -168,6 +182,10 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.serve_mqtt_config()
         elif path == '/api/connect':
             self.serve_connect_config()
+        elif path == '/api/eink':
+            self.serve_eink()
+        elif path == '/api/eink/preview.png':
+            self.serve_eink_preview()
         elif path.startswith('/photos/'):
             photo_name = path[8:]  # Remove '/photos/' prefix
             self.serve_photo(photo_name)
@@ -232,6 +250,10 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.handle_wifi_reconfigure()
         elif self.path == '/api/wizard/complete':
             self.handle_wizard_complete()
+        elif self.path == '/api/eink':
+            self.handle_save_eink()
+        elif self.path == '/api/eink/refresh':
+            self.handle_eink_refresh()
         else:
             self.send_error(404, "Not found")
 
@@ -434,7 +456,22 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         info = self.app.sysinfo_cache.get() if self.app and self.app.sysinfo_cache else {}
         ips = info.get('ips', []) or []
         urls = [f"http://{ip}:8080/remote?token={token}" for ip in ips]
-        self._json_response({'token': token, 'ips': ips, 'urls': urls})
+        # mDNS name: lets a phone that was on the setup hotspot find the frame
+        # again on the home network before anyone knows its new IP.
+        try:
+            import socket
+            hostname = socket.gethostname().split('.')[0] or 'mimir'
+        except Exception:
+            hostname = 'mimir'
+        setup_complete = bool(self.app.config.get('setup_complete'))
+        page = 'remote' if setup_complete else 'wizard'
+        self._json_response({
+            'token': token, 'ips': ips, 'urls': urls,
+            'hostname': hostname,
+            'setup_complete': setup_complete,
+            'variant': variant(self.app.config),
+            'continue_url': f"http://{hostname}.local:8080/{page}?token={token}",
+        })
 
     def handle_set_brightness(self):
         """Set the display backlight brightness via DDC/CI (VCP 10).
@@ -497,6 +534,9 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             'nextcloud': {'share_urls': cfg.get('nextcloud', {}).get('share_urls', [])},
             'sleep_method': cfg.get('energy_save', {}).get('method', 'ddcci'),
             'clock': cfg.get('clock', {}),
+            'variant': variant(cfg),
+            'eink': cfg.get('eink', {}),
+            'setup_complete': bool(cfg.get('setup_complete')),
         }
         self._json_response(data)
 
@@ -1065,7 +1105,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
 
                 def apply_orientation():
                     time.sleep(1)
-                    subprocess.run(['sudo', 'systemctl', 'restart', DISPLAY_SERVICE],
+                    subprocess.run(['sudo', 'systemctl', 'restart',
+                                    display_service(self.app.config)],
                                  capture_output=True, timeout=15)
                     logger.info(f"Orientation changed to {new_orientation}, restarted display")
                     # Re-skin the boot splash for the new orientation so it
@@ -1124,7 +1165,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
 
             def restart_display():
                 time.sleep(1)
-                subprocess.run(['sudo', 'systemctl', 'restart', DISPLAY_SERVICE],
+                subprocess.run(['sudo', 'systemctl', 'restart',
+                                    display_service(self.app.config)],
                                capture_output=True, timeout=15)
                 # On a real change, rebuild the newly-active orientation from the
                 # sources and shrink the old one back to the shipped defaults, so
@@ -1465,13 +1507,101 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             if orientation != old_orientation:
                 def restart_cage():
                     time.sleep(1)
-                    subprocess.run(['sudo', 'systemctl', 'restart', DISPLAY_SERVICE],
+                    subprocess.run(['sudo', 'systemctl', 'restart',
+                                    display_service(self.app.config)],
                                  capture_output=True, timeout=15)
                     logger.info(f"Orientation changed to {orientation}, restarted display")
                 threading.Thread(target=restart_cage, daemon=True).start()
         except Exception as e:
             logger.error(f"Error saving frame settings: {e}")
             self._json_response({'ok': False, 'error': str(e)}, 400)
+
+    # --- E-ink variant ---
+
+    def _eink_state_file(self, name):
+        base = (self.app.config.get('photos', {}) or {}).get(
+            'base_dir', '/srv/frame/photos')
+        return Path(base) / name
+
+    def serve_eink(self):
+        """E-ink settings + what the cycle last did (battery, last/next
+        picture) — the cycle writes its state file, we only read it."""
+        status = {}
+        try:
+            with open(self._eink_state_file('eink_state.json')) as f:
+                st = json.load(f)
+            status = {k: st.get(k) for k in (
+                'battery', 'plugged', 'pisugar', 'last_draw', 'next_wake',
+                'last_image')}
+        except Exception:
+            pass
+        self._json_response({
+            'variant': variant(self.app.config),
+            'config': self.app.config.get('eink', {}) or {},
+            'status': status,
+        })
+
+    def serve_eink_preview(self):
+        """PNG of what the panel currently shows (written by the cycle)."""
+        path = self._eink_state_file('eink_preview.png')
+        try:
+            data = path.read_bytes()
+        except Exception:
+            self.send_error(404, "No preview yet")
+            return
+        self.send_response(200)
+        self.send_header('Content-Type', 'image/png')
+        self.send_header('Content-Length', len(data))
+        self.send_header('Cache-Control', 'no-cache')
+        self.end_headers()
+        self.wfile.write(data)
+
+    def handle_save_eink(self):
+        """Save the e-ink settings a user may change from the phone. Hardware
+        keys (driver, palette, size) are deliberately NOT writable here — they
+        describe the panel that is soldered on, not a preference."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body) if body else {}
+            eink = dict(self.app.config.get('eink', {}) or {})
+            if 'update_time' in data:
+                h, m = (int(x) for x in str(data['update_time']).split(':')[:2])
+                if not (0 <= h < 24 and 0 <= m < 60):
+                    raise ValueError('Invalid update_time')
+                eink['update_time'] = '%02d:%02d' % (h, m)
+            if 'updates_per_day' in data:
+                eink['updates_per_day'] = max(1, min(24, int(data['updates_per_day'])))
+            if 'show_date' in data:
+                eink['show_date'] = bool(data['show_date'])
+            if 'fit' in data:
+                if data['fit'] not in ('cover', 'contain'):
+                    raise ValueError('Invalid fit')
+                eink['fit'] = data['fit']
+            with open(self.app.config_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            cfg['eink'] = eink
+            with open(self.app.config_path, 'w') as f:
+                yaml.dump(cfg, f, default_flow_style=False)
+            self.app.config['eink'] = eink
+            self._json_response({'ok': True, 'eink': eink})
+        except Exception as e:
+            logger.error(f"Error saving e-ink settings: {e}")
+            self._json_response({'ok': False, 'error': str(e)}, 400)
+
+    def handle_eink_refresh(self):
+        """Draw a new picture now: restart the cycle (it draws on start)."""
+        if variant(self.app.config) != 'eink':
+            self._json_response({'ok': False, 'error': 'not an e-ink frame'}, 400)
+            return
+        self._json_response({'ok': True})
+
+        def restart():
+            time.sleep(0.5)
+            subprocess.run(['sudo', 'systemctl', 'restart',
+                            display_service(self.app.config)],
+                           capture_output=True, timeout=30)
+        threading.Thread(target=restart, daemon=True).start()
 
     def handle_sleep_test(self):
         """Test a sleep method for the wizard. Blocks for ~10 seconds."""
@@ -1521,14 +1651,13 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
     def handle_not_found(self):
         """Handle 404 — redirect to /setup in hotspot mode (captive portal)."""
         if self.app and self.app.wifi_manager and self.app.wifi_manager.mode == 'hotspot':
-            if self.app.wizard_mode:
-                self.send_response(302)
-                self.send_header('Location', '/wizard')
-                self.end_headers()
-            else:
-                self.send_response(302)
-                self.send_header('Location', '/setup')
-                self.end_headers()
+            # Captive-portal probes (/generate_204, /hotspot-detect.html, ...)
+            # land here: send the phone to the Wi-Fi page. Always Wi-Fi first,
+            # also before setup is complete — the wizard follows once the frame
+            # is on the home network.
+            self.send_response(302)
+            self.send_header('Location', '/setup')
+            self.end_headers()
         else:
             self.send_error(404, "Not found")
 

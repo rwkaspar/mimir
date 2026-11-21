@@ -413,6 +413,10 @@
     <div class="step" id="step-5">
         <div class="step-title" data-i18n="albums_title">Photo Albums</div>
         <div class="step-subtitle" data-i18n="albums_subtitle_qr">Scan the QR code to add albums from your phone</div>
+        <div id="album-phone-setup" style="display:none; margin-bottom:16px;">
+            <a class="btn btn-primary" id="album-open-link" target="_blank" rel="noopener" style="display:block; text-align:center; text-decoration:none;" data-i18n="albums_open">Add photo albums</a>
+            <div style="color:#888; font-size:13px; margin-top:8px;" data-i18n="albums_open_hint">Opens the album page in a new tab. Come back here when you are done.</div>
+        </div>
         <div id="album-qr-setup" style="text-align:center; margin-bottom:16px;">
             <div class="qr-container"><canvas id="album-qr-canvas"></canvas></div>
             <div id="album-qr-url" style="color:#888; font-size:12px; word-break:break-all; margin-top:8px;"></div>
@@ -440,9 +444,38 @@
     </div>
 
     <script>
+    // --- Access token: captured from ?token=... (the QR on the frame),
+    // persisted, and attached to every API request so the frame accepts this
+    // phone from the home network. On the panel itself (localhost) and on the
+    // setup hotspot no token is needed.
+    (function () {
+        var token = null;
+        try {
+            var m = location.search.match(/[?&]token=([^&]+)/);
+            if (m) { token = decodeURIComponent(m[1]); localStorage.setItem('pf_token', token); }
+            else { token = localStorage.getItem('pf_token'); }
+        } catch (e) {}
+        window.pfToken = token;
+        if (!token) return;
+        var _fetch = window.fetch;
+        window.fetch = function (input, init) {
+            init = init || {};
+            var h = new Headers(init.headers || {});
+            h.set('X-Frame-Token', token);
+            init.headers = h;
+            return _fetch(input, init);
+        };
+    })();
+    // True when this page runs in a browser ON the frame (legacy kiosk); false
+    // on a phone or PC, which is the normal way to set a frame up.
+    var onPanel = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+
     // --- i18n ---
     var i18n = {
         en: {
+            albums_subtitle_phone: 'Add the shared albums the frame should show',
+            albums_open: 'Add photo albums',
+            albums_open_hint: 'Opens the album page in a new tab. Come back here when you are done.',
             wifi_title: 'WiFi',
             wifi_subtitle: 'Connect to your home network',
             rescan: 'Rescan',
@@ -633,6 +666,9 @@
             no_albums: 'Noch keine Alben hinzugef\u00fcgt',
             done_title: 'Fertig!',
             done_subtitle: 'Deine Konfiguration',
+            albums_subtitle_phone: 'Füge die geteilten Alben hinzu, die der Rahmen zeigen soll',
+            albums_open: 'Fotoalben hinzufügen',
+            albums_open_hint: 'Öffnet die Album-Seite in einem neuen Tab. Komm danach hierher zurück.',
             summary_frame: 'Rahmen',
             summary_network: 'Netzwerk',
             summary_albums: 'Alben',
@@ -646,7 +682,7 @@
         }
     };
 
-    var lang = 'en';
+    var lang = (!onPanel && /^de/i.test(navigator.language || '')) ? 'de' : 'en';
     function t(k) { return (i18n[lang] || i18n.en)[k] || k; }
     function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
@@ -688,12 +724,23 @@
         if (n === 6) renderSummary();
     }
 
+    // Steps that do not apply to this frame are skipped in both directions:
+    // an e-ink frame has no backlight, so the "sleep mode" step (4) is moot.
+    var skippedSteps = {};
+    fetch('/api/frame/settings').then(function(r) { return r.json(); }).then(function(d) {
+        if (d && d.variant === 'eink') skippedSteps[4] = true;
+    }).catch(function() {});
+
     function nextStep() {
-        if (currentStep < totalSteps) showStep(currentStep + 1);
+        var n = currentStep + 1;
+        while (skippedSteps[n] && n < totalSteps) n++;
+        if (n <= totalSteps) showStep(n);
     }
 
     function prevStep() {
-        if (currentStep > 1) showStep(currentStep - 1);
+        var n = currentStep - 1;
+        while (skippedSteps[n] && n > 1) n--;
+        if (n >= 1) showStep(n);
     }
 
     function updateProgress() {
@@ -1107,9 +1154,19 @@
     }
 
     function albumsRender() {
+        // On a phone the album page is one tap away — a QR code to scan with the
+        // very phone you are holding would be absurd.
+        if (!onPanel) {
+            document.getElementById('album-qr-setup').style.display = 'none';
+            document.getElementById('album-phone-setup').style.display = '';
+            var sub = document.querySelector('#step-5 .step-subtitle');
+            if (sub) sub.textContent = t('albums_subtitle_phone');
+            document.getElementById('album-open-link').href =
+                '/remote' + (window.pfToken ? '?token=' + encodeURIComponent(window.pfToken) : '');
+        }
         // Generate QR code pointing to the remote config page. Include the
         // access token so the phone is authorized once it leaves the hotspot.
-        fetch('/api/access').then(function(r) { return r.json(); }).then(function(acc) {
+        if (onPanel) fetch('/api/access').then(function(r) { return r.json(); }).then(function(acc) {
             var remoteUrl = (acc.urls && acc.urls[0]) ||
                 ('http://' + location.hostname + ':8080/remote');
             var qrUrlEl = document.getElementById('album-qr-url');
@@ -1335,8 +1392,11 @@
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (data.ok) {
-                // Redirect to slideshow
-                setTimeout(function() { window.location.href = '/'; }, 2000);
+                // On the panel: back to the viewer. On a phone: the settings page
+                // (the frame itself now starts showing photos).
+                var dest = onPanel ? '/' : '/remote' +
+                    (window.pfToken ? '?token=' + encodeURIComponent(window.pfToken) : '');
+                setTimeout(function() { window.location.href = dest; }, 2000);
             }
         })
         .catch(function() {
@@ -1364,7 +1424,13 @@
             remove a full-viewport layer) a few times after load clears it.
          2. Hide the pointer: WPE shows a cursor because libinput classifies the
             USB touch panel as a pointer; this is a touch kiosk. -->
-    <style>* { cursor: none !important; }</style>
+    <script>
+      if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) {
+        var cs = document.createElement('style');
+        cs.textContent = '* { cursor: none !important; }';
+        document.head.appendChild(cs);
+      }
+    </script>
     <script>
       addEventListener('load', function () {
         function repaint() {

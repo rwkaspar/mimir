@@ -176,6 +176,16 @@
             margin-right: 8px;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        #next-box {
+            display: none;
+            background: #16202c;
+            border: 1px solid #2c4a6e;
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 0 80px;
+        }
+        .next-title { font-size: 17px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+        .next-body { font-size: 14px; line-height: 1.45; color: #b8c4d2; }
         .empty-state {
             text-align: center;
             color: #666;
@@ -191,6 +201,7 @@
     <div id="networks"></div>
     <button class="btn-rescan" id="btn-rescan" onclick="scanNetworks()">Rescan</button>
 
+    <div id="next-box"></div>
     <div id="status-bar"></div>
 
     <script>
@@ -232,9 +243,18 @@
                 failed: 'Fehler: ',
                 try_again: '. Erneut versuchen.',
                 connecting_lost: 'Verbinde... der Hotspot wird beendet. Verbinde dich mit deinem WLAN und pr\u00fcfe ob der Rahmen funktioniert.',
+                next_title: 'So geht es weiter',
+                next_body: 'Der Rahmen wechselt jetzt in dein WLAN und zeigt einen QR-Code. Verbinde dein Handy wieder mit deinem WLAN und scanne den Code \u2013 oder tippe hier:',
+                next_link: 'Einrichtung fortsetzen',
+                next_link_done: 'Einstellungen \u00f6ffnen',
             }
         };
-        var lang = localStorage.getItem('frame-language') || 'en';
+        i18n.en.next_title = 'What happens next';
+        i18n.en.next_body = 'The frame now joins your Wi-Fi and shows a QR code. Reconnect your phone to your Wi-Fi and scan the code \u2013 or tap here:';
+        i18n.en.next_link = 'Continue setup';
+        i18n.en.next_link_done = 'Open settings';
+        var lang = localStorage.getItem('frame-language') ||
+            (/^de/i.test(navigator.language || '') ? 'de' : 'en');
         function t(k) { return (i18n[lang] || i18n.en)[k] || k; }
 
         function applyLang() {
@@ -247,6 +267,29 @@
         var networks = [];
         var selectedSSID = null;
         var connecting = false;
+
+        // Where to go once the frame has left the hotspot. Fetched NOW, while we
+        // can still reach it: afterwards the phone is on another network and the
+        // frame has a new address. (Absent on the bare first-boot Wi-Fi server —
+        // then the QR code on the frame is the way on.)
+        var continueInfo = null;
+        fetch('/api/access').then(function(r) { return r.json(); }).then(function(a) {
+            if (a && a.continue_url) continueInfo = a;
+        }).catch(function() {});
+
+        function showNext() {
+            var box = document.getElementById('next-box');
+            if (!box) return;
+            var html = '<div class="next-title">' + t('next_title') + '</div>' +
+                '<div class="next-body">' + t('next_body') + '</div>';
+            if (continueInfo) {
+                html += '<a class="btn btn-connect" style="display:block;text-align:center;text-decoration:none;margin-top:12px;" href="' +
+                    escapeHtml(continueInfo.continue_url) + '">' +
+                    t(continueInfo.setup_complete ? 'next_link_done' : 'next_link') + '</a>';
+            }
+            box.innerHTML = html;
+            box.style.display = 'block';
+        }
 
         function signalBars(signal) {
             // 4 bars: thresholds at 20, 40, 60, 80
@@ -351,6 +394,7 @@
                     showStatus(t('connected_ok'), 'success');
                     selectedSSID = null;
                     render();
+                    showNext();
                 } else {
                     showStatus(t('failed') + (data.message || 'Unknown error') + t('try_again'), 'error');
                     render();
@@ -360,6 +404,7 @@
                 // Expected: phone loses connection when hotspot drops
                 connecting = false;
                 showStatus(t('connecting_lost'), 'connecting');
+                showNext();
             });
         }
 

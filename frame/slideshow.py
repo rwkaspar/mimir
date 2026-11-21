@@ -17,6 +17,7 @@ Design notes / hardware facts (see memory zero-video-ram-limit):
     down cleanly (EOS / SIGINT) — NEVER SIGKILL (leaks the MMAL decoder).
   * Resolution comes from the panel (fb0 geometry), capped for weak boards.
 """
+import collections
 import glob
 import logging
 import os
@@ -73,6 +74,11 @@ class NativeSlideshow:
         # progress from the TouchReader thread.
         self._hold_req = threading.Event()
         self._hold_frac = 0.0
+        # First-run / Wi-Fi setup screen (see _run_setup): while it is up, taps
+        # go to its buttons and the hot corner is inert.
+        self._setup_active = False
+        self._setup_taps = collections.deque()
+        self._hint_pending = False   # show the Wi-Fi hint instead of the menu
         # Target render size = panel, capped on weak boards.
         cap = LOW_MEM_MAX_DIM if low_memory else 10**9
         scale = min(1.0, cap / float(max(self.fb_w, self.fb_h)))
@@ -549,11 +555,16 @@ class NativeSlideshow:
         self._native_ui = native_ui
 
         def on_hot_corner():
+            if self._setup_active:
+                return                 # no settings menu before setup is done
             if self._ui is None or self._ui.screen is None:
                 logger.info("Hot corner: opening settings")
                 self._menu_req.set()
 
         def on_tap(x, y):
+            if self._setup_active:
+                self._setup_taps.append((x, y))
+                return
             if self._ui is not None and self._ui.screen is not None:
                 self._menu_activity = time.time()
                 # Don't render on the touch thread (a render would block event
@@ -690,7 +701,9 @@ class NativeSlideshow:
         self._fb_write_bytes(packed.tobytes())
 
     def _on_hot_progress(self, frac):
-        # Ignore while the menu is already open.
+        # Ignore while the menu is already open, or during first-run setup.
+        if self._setup_active:
+            return
         if self._ui is not None and self._ui.screen is not None:
             return
         self._hold_frac = frac
@@ -743,6 +756,8 @@ class NativeSlideshow:
         the menu instead of the stale last photo (no photo flash)."""
         if self._native_ui is None:
             return False
+        if self._hint_pending:
+            return False                    # _open_menu shows the Wi-Fi hint
         if self._ui is None:
             self._ui = self._native_ui.NativeUI(
                 hooks=self._menu_hooks(), orientation=self._orientation())
@@ -756,6 +771,10 @@ class NativeSlideshow:
         """Show the settings menu and block playback until it closes."""
         self._menu_req.clear()
         self._hold_req.clear()
+        if self._hint_pending:
+            self._hint_pending = False
+            self._run_setup(hint_only=True)
+            return
         if not self._prep_menu():
             return
         # Block the slideshow while the menu is open. The TouchReader thread only
@@ -879,6 +898,175 @@ class NativeSlideshow:
         except Exception as e:
             logger.warning('boot splash failed: %s', e, exc_info=True)
 
+    # --- first-run setup (phone-first) ---
+
+    # After setup, a frame that boots without its Wi-Fi shows how to reconnect
+    # it for this long, then carries on with the photos it has (an offline frame
+    # must still be a photo frame). Cold boot only.
+    WIFI_HINT_SECONDS = 90
+    SETUP_POLL_SECONDS = 3.0
+
+    def _setup_state(self):
+        """'incomplete' | 'complete' | 'unknown'.
+
+        The server rewrites the config in place, so a read can catch it half
+        written (-> {} here). 'unknown' means "don't act on this read" — a
+        working frame must never flash the setup screen because of a torn read.
+        """
+        cfg = self._cfg()
+        if not cfg:
+            return 'unknown'
+        return 'complete' if cfg.get('setup_complete') else 'incomplete'
+
+    def _setup_needed(self):
+        """True only if two reads in a row say setup is incomplete."""
+        if self._setup_state() != 'incomplete':
+            return False
+        time.sleep(0.3)
+        return self._setup_state() == 'incomplete'
+
+    def _lang(self):
+        lang = (self._cfg().get('frame', {}) or {}).get('language', 'de')
+        return lang if lang in ('de', 'en') else 'de'
+
+    def _run_setup(self, hint_only=False):
+        """Show "set me up with your phone" until setup is complete.
+
+        The frame is configured from a phone, so the panel just has to say how
+        to get there (frame/setup_screen.py): a QR that joins the frame's own
+        hotspot while it has no Wi-Fi, then a QR that opens the wizard once it
+        is on the home network. A touch panel is optional — touch builds get a
+        "continue here" button that opens the on-panel menu instead.
+
+        State comes from the server over localhost (/api/wifi/status,
+        /api/access, /api/qrcode) and the config file (`setup_complete`, which
+        the wizard flips). `hint_only` is the post-setup variant: a time-limited
+        "Wi-Fi not reachable" hint that only shows while the hotspot is up.
+        """
+        if self._native_ui is None:
+            logger.warning("Setup screen unavailable (no native UI deps)")
+            return
+        try:
+            from frame import setup_screen
+        except Exception as e:
+            logger.warning("Setup screen unavailable: %s", e)
+            return
+        if self._ui is None:
+            self._ui = self._native_ui.NativeUI(
+                hooks=self._menu_hooks(), orientation=self._orientation())
+        ui = self._ui
+        canvas = ui.canvas
+        logger.info("Setup screen: %s",
+                    "Wi-Fi hint" if hint_only else "first-run setup")
+        self._showing_photo = False
+        self._setup_taps.clear()
+        self._setup_active = True
+        drawn_key = None
+        hits = {}
+        next_poll = 0.0
+        deadline = time.time() + self.WIFI_HINT_SECONDS if hint_only else None
+        try:
+            while not self._stop.is_set():
+                now = time.time()
+                if deadline is not None and now > deadline:
+                    logger.info("Setup screen: Wi-Fi hint timed out, playing")
+                    break
+                if now >= next_poll:
+                    next_poll = now + self.SETUP_POLL_SECONDS
+                    if not hint_only and self._setup_state() == 'complete':
+                        logger.info("Setup screen: setup complete")
+                        break
+                    st = ui.api_get('/api/wifi/status')
+                    touch = self._native_ui.touch_present()
+                    info, qr_text = {}, None
+                    if st is None:
+                        stage = 'starting'            # server not up yet
+                    elif st.get('mode') == 'hotspot':
+                        stage = 'wifi_lost' if hint_only else 'wifi'
+                        info = {'ssid': st.get('hotspot_ssid') or 'mimir-Setup',
+                                'password': st.get('hotspot_password') or 'photoframe',
+                                'url': 'http://10.42.0.1:8080'}
+                        qr_text = setup_screen.wifi_qr_payload(
+                            info['ssid'], info['password'])
+                    elif hint_only:
+                        break                          # Wi-Fi is fine: nothing to say
+                    else:
+                        stage = 'phone'
+                        acc = ui.api_get('/api/access') or {}
+                        ips = acc.get('ips') or []
+                        host = ips[0] if ips else (st.get('ip') or 'mimir.local')
+                        info = {'ssid': st.get('ssid') or 'WLAN'}
+                        if acc.get('token'):
+                            qr_text = 'http://%s:8080/wizard?token=%s' % (
+                                host, acc['token'])
+                    key = (stage, tuple(sorted(info.items())), qr_text, touch)
+                    if key != drawn_key:
+                        mods = None
+                        if qr_text:
+                            qr = ui.api_get('/api/qrcode?text=' +
+                                            self._native_ui._q(qr_text)) or {}
+                            mods = qr.get('modules')
+                        img, hits = setup_screen.render(
+                            (canvas.w, canvas.h), stage, mods, info,
+                            theme='dark', lang=self._lang(),
+                            touch=touch, skippable=hint_only)
+                        canvas.img = img
+                        canvas.flush()
+                        # Without the code the screen is incomplete: retry next
+                        # poll instead of remembering it as drawn.
+                        drawn_key = key if (mods or not qr_text) else None
+                while self._setup_taps:
+                    x, y = self._setup_taps.popleft()
+                    if self._native_ui._hit(hits.get('skip'), x, y):
+                        logger.info("Setup screen: skipped by tap")
+                        return
+                    if self._native_ui._hit(hits.get('continue'), x, y):
+                        # Touch build: finish setup here and open the on-panel
+                        # menu. Completing first is what keeps this screen from
+                        # coming back on the next boot.
+                        logger.info("Setup screen: continue on the panel")
+                        ui.api_post('/api/wizard/complete')
+                        self._menu_req.set()
+                        return
+                time.sleep(0.1)
+        except Exception as e:
+            logger.warning("Setup screen failed: %s", e, exc_info=True)
+        finally:
+            self._setup_active = False
+            self._setup_taps.clear()
+
+    def _watch_wifi_hint(self):
+        """Post-setup, cold boot only: if the server fell back to its setup
+        hotspot (the frame did not find its Wi-Fi), interrupt playback once with
+        the "how to reconnect" screen.
+
+        Runs in a background thread so a slow-starting server never delays the
+        first photo; it raises the hint through the menu-request path, which
+        every playback wait already honours."""
+        up = self._uptime()
+        if up is None or up > 300 or self._native_ui is None:
+            return
+
+        def watch():
+            import json
+            import urllib.request
+            for _ in range(30):                      # ~60s for the server to settle
+                if self._stop.wait(2):
+                    return
+                try:
+                    with urllib.request.urlopen(
+                            'http://localhost:8080/api/wifi/status', timeout=3) as r:
+                        mode = json.loads(r.read().decode()).get('mode')
+                except Exception:
+                    continue
+                if mode == 'hotspot':
+                    logger.info("Wi-Fi hint: frame is on its setup hotspot")
+                    self._hint_pending = True
+                    self._menu_req.set()
+                return
+
+        threading.Thread(target=watch, daemon=True).start()
+
     # --- main loop ---
 
     def stop(self):
@@ -888,6 +1076,10 @@ class NativeSlideshow:
         logger.info("Native slideshow starting")
         self._start_touch()
         self._boot_splash()
+        if self._setup_needed():
+            self._run_setup()
+        else:
+            self._watch_wifi_hint()
         buf_a = '/tmp/slideshow_a.raw'
         buf_b = '/tmp/slideshow_b.raw'
         cur, nxt = buf_a, buf_b

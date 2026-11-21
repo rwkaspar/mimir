@@ -12,6 +12,7 @@ from frame.config import AppState
 from frame.energy import SysinfoCache, EnergySaveManager
 from frame.wifi import WiFiManager
 from frame.routes import PhotoFrameHandler
+from frame.services import variant
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,6 +55,14 @@ def main():
 
     slideshow_config = config.get('slideshow', {})
 
+    # E-ink frames show stills only and have no backlight to manage: no video
+    # (so the sync never transcodes one) and no sleep/wake scheduler. The
+    # wake-draw-sleep cycle (frame/eink_cycle.py) is their whole power story.
+    eink = variant(config) == 'eink'
+    if eink:
+        config.setdefault('videos', {})['enabled'] = False
+        logger.info("Variant: e-ink (stills only, no backlight scheduler)")
+
     # Detect wizard mode: setup not yet completed
     if not config.get('setup_complete'):
         app.wizard_mode = True
@@ -74,7 +83,8 @@ def main():
 
     # Start energy-save loop AFTER syncer is ready (avoids race where
     # _set_sleep triggers before syncer is initialized)
-    app.energy_save.start()
+    if not eink:
+        app.energy_save.start()
 
     # Native video interludes: the cog/WPE kiosk can't decode video on this
     # board, so a scheduler briefly drops the kiosk and plays videos straight to
@@ -82,7 +92,8 @@ def main():
     # <photos_dir>/<orientation>/*.mp4 but are excluded from the kiosk's /list.
     video_cfg = config.get('videos', {}) or {}
     app.native_video = None
-    if video_cfg.get('enabled', True) and video_cfg.get('native_enabled', True):
+    if (not eink and video_cfg.get('enabled', True)
+            and video_cfg.get('native_enabled', True)):
         from frame.native_video import NativeVideoPlayer, VideoScheduler
         app.native_video = NativeVideoPlayer(app, photos_dir)
         interval_s = int(video_cfg.get('native_interval_minutes', 10)) * 60
