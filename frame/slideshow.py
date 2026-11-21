@@ -349,23 +349,22 @@ class NativeSlideshow:
     # --- clock over video ---
     #
     # While a clip plays, kmssink owns the display and fb0 (where the photo
-    # clock is drawn) is not shown. So for video the clock goes INTO the video:
-    # the same PIL rendering as the photo clock is saved as a small transparent
-    # PNG and blended onto the decoded frames by `gdkpixbufoverlay`, right before
-    # kmssink. Only the clock's bounding box is blended, so the cost per frame is
-    # tiny. Drawing it ourselves (instead of GStreamer's clockoverlay) keeps the
-    # look identical to the photo clock and lets us rotate it for a portrait
-    # mount, which pango overlays cannot do.
+    # clock is drawn) is not shown. So for video the clock gets its own hardware
+    # plane above the video (frame/display/drm_plane.py): the same PIL rendering
+    # as the photo clock, blended by the display controller. That costs nothing
+    # per video frame and leaves the decoder -> display path zero-copy. (Blending
+    # it into the stream with gdkpixbufoverlay copied every frame: ~13x the CPU
+    # of plain playback on a Pi Zero 2 W.)
+    #
+    # KMS has one master, so the plane must share kmssink's DRM fd: we open the
+    # card, pass `fd=` to kmssink and put the plane on the same fd.
 
-    _CLOCK_PNGS = ('/tmp/slideshow_clock_a.png', '/tmp/slideshow_clock_b.png')
-    _clock_png_i = 0
-    _overlay_broken = False     # the overlay element failed once: play without
+    _overlay_broken = False     # shared-fd playback failed once: play without
 
-    def _clock_overlay_png(self):
-        """Render the current clock as a cropped RGBA PNG in NATIVE (framebuffer)
-        orientation. Returns (path, x, y) — where to place it on the video — or
-        None when the clock is off. Alternates between two files so that setting
-        the element's `location` always names a new file (= a reload)."""
+    def _clock_overlay_image(self):
+        """The current clock as a cropped RGBA image in NATIVE (framebuffer)
+        orientation. Returns (image, x, y) — where it goes on screen — or None
+        when the clock is off."""
         cfg = self._clock_cfg()
         if not cfg['enabled'] or self._overlay_broken:
             return None
@@ -380,47 +379,94 @@ class NativeSlideshow:
             box = im.getbbox()
             if not box:
                 return None
-            # Even offsets: the video is 4:2:0, chroma is shared by 2x2 pixels.
-            x0, y0 = box[0] & ~1, box[1] & ~1
-            self._clock_png_i ^= 1
-            path = self._CLOCK_PNGS[self._clock_png_i]
-            im.crop((x0, y0, box[2], box[3])).save(path, 'PNG')
-            return path, x0, y0
+            return im.crop(box), box[0], box[1]
         except Exception as e:
             logger.warning('clock overlay render failed: %s', e)
             return None
 
-    def _video_pipeline_desc(self, path, overlay=True):
-        """gst-launch description for playing `path` straight to the panel, with
-        the clock blended in when it is enabled."""
-        ov = self._clock_overlay_png() if overlay else None
-        clk = ''
-        if ov:
-            clk = ('gdkpixbufoverlay name=clk location=%s offset-x=%d '
-                   'offset-y=%d ! ' % ov)
-        return ('filesrc location="%s" ! qtdemux ! h264parse ! v4l2h264dec ! '
-                '%skmssink force-modesetting=true' % (path, clk))
+    def _video_pipeline_desc(self, path, fd=None):
+        """gst-launch description for playing `path` straight to the panel.
+        `fd`: a DRM fd we opened, shared with kmssink so the clock plane can
+        live next to the video."""
+        sink = 'kmssink force-modesetting=true'
+        if fd is not None:
+            sink += ' fd=%d' % fd
+        return ('filesrc location="%s" ! qtdemux ! h264parse ! v4l2h264dec ! %s'
+                % (path, sink))
 
-    def _refresh_clock_overlay(self, pipe):
-        """Minute rolled over mid-clip: swap in a freshly rendered clock."""
-        el = pipe.get_by_name('clk')
-        if el is None:
-            return
-        ov = self._clock_overlay_png()
-        if ov:
-            el.set_property('offset-x', ov[1])
-            el.set_property('offset-y', ov[2])
-            el.set_property('location', ov[0])
+    class _VideoClock:
+        """The clock plane for one video pipeline. `fd` is None when there is
+        no clock to show (off, or the DRM card could not be opened) — then the
+        pipeline is built without a shared fd and nothing else happens."""
+
+        def __init__(self, show, want=True):
+            self._show = show
+            self.fd = None
+            self._plane = None
+            self._playing = False
+            self._min = None
+            if want and show._clock_overlay_image() is not None:
+                try:
+                    from frame.display import drm_plane
+                    self.fd = drm_plane.open_card()
+                except Exception as e:
+                    logger.warning('clock over video unavailable: %s', e)
+
+        def tick(self, pipe):
+            """Call regularly while the pipeline runs: draws the clock once the
+            video is actually playing, and again when the minute rolls over.
+            (Not earlier: kmssink's mode-set on start clears other planes.)"""
+            if self.fd is None:
+                return
+            if not self._playing:
+                from gi.repository import Gst
+                if pipe.get_state(0)[1] != Gst.State.PLAYING:
+                    return
+                self._playing = True
+            m = time.localtime().tm_min
+            if m != self._min:
+                self._min = m
+                self.draw()
+
+        def draw(self):
+            if self.fd is None:
+                return
+            ov = self._show._clock_overlay_image()
+            try:
+                if self._plane is None:
+                    from frame.display import drm_plane
+                    self._plane = drm_plane.Plane(self.fd)
+                if ov:
+                    self._plane.show(*ov)
+            except Exception as e:
+                logger.warning('clock plane failed: %s', e)
+
+        def close(self):
+            """After the pipeline is in NULL: drop the plane, then the fd (the
+            last close hands the screen back to fb0)."""
+            if self._plane is not None:
+                try:
+                    self._plane.close()
+                except Exception:
+                    pass
+                self._plane = None
+            if self.fd is not None:
+                try:
+                    os.close(self.fd)
+                except OSError:
+                    pass
+                self.fd = None
 
     def _play_video_gi(self, path, overlay=True):
         """Play one clip in-process (GStreamer via python-gi) so the clock
-        overlay can be updated while it plays. Returns False if the pipeline
-        errored (the caller may retry without the overlay)."""
+        plane can share its DRM fd. Returns False if the pipeline errored (the
+        caller may retry without the clock)."""
         import gi
         gi.require_version('Gst', '1.0')
         from gi.repository import Gst, GLib
         Gst.init(None)
-        pipe = Gst.parse_launch(self._video_pipeline_desc(path, overlay))
+        clock = self._VideoClock(self, overlay)
+        pipe = Gst.parse_launch(self._video_pipeline_desc(path, clock.fd))
         gloop = GLib.MainLoop()
         bus = pipe.get_bus()
         bus.add_signal_watch()
@@ -437,8 +483,6 @@ class NativeSlideshow:
 
         bus.connect('message', on_msg)
         deadline = time.time() + self._duration(path) + 15
-        state = {'min': time.localtime().tm_min}
-
         def tick():
             if self._menu_req.is_set():
                 self._prep_menu()     # draw menu to fb0 BEFORE kmssink releases
@@ -448,10 +492,7 @@ class NativeSlideshow:
                     or time.time() > deadline):
                 gloop.quit()
                 return False
-            m = time.localtime().tm_min
-            if m != state['min']:
-                state['min'] = m
-                self._refresh_clock_overlay(pipe)
+            clock.tick(pipe)
             return True
 
         GLib.timeout_add(150, tick)
@@ -461,6 +502,7 @@ class NativeSlideshow:
         finally:
             pipe.set_state(Gst.State.NULL)   # clean teardown, no MMAL leak
             bus.remove_signal_watch()
+            clock.close()
         return result['ok']
 
     def _play_video(self, path):
@@ -474,7 +516,7 @@ class NativeSlideshow:
                 return
             if (self._clock_cfg()['enabled'] and not self._overlay_broken
                     and not (self._stop.is_set() or self._menu_req.is_set())):
-                logger.warning("Video failed with the clock overlay; "
+                logger.warning("Video failed with the clock plane; "
                                "retrying without it")
                 self._overlay_broken = True
                 if self._play_video_gi(path, overlay=False):
@@ -611,8 +653,8 @@ class NativeSlideshow:
 
         joined = self._build_concat(videos) or videos[0]
         start_sig = self._video_sig(videos)
-        pipe = Gst.parse_launch(self._video_pipeline_desc(joined))
-        clock_min = {'min': time.localtime().tm_min}
+        clock = self._VideoClock(self)
+        pipe = Gst.parse_launch(self._video_pipeline_desc(joined, clock.fd))
         gloop = GLib.MainLoop()
         bus = pipe.get_bus()
         bus.add_signal_watch()
@@ -654,10 +696,7 @@ class NativeSlideshow:
                 logger.info("Video wall: media changed, rebuilding")
                 gloop.quit()
                 return False
-            m = time.localtime().tm_min
-            if m != clock_min['min']:
-                clock_min['min'] = m
-                self._refresh_clock_overlay(pipe)
+            clock.tick(pipe)
             return True
 
         GLib.timeout_add(150, tick)
@@ -670,6 +709,7 @@ class NativeSlideshow:
             gloop.run()
         finally:
             pipe.set_state(Gst.State.NULL)   # clean teardown, no MMAL leak
+            clock.close()
 
     # --- settings menu (hot corner) ---
 

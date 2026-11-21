@@ -73,26 +73,39 @@ def test_sudo_refusal_is_reported_as_config_fault_not_as_dead_panel(monkeypatch,
     assert len(msgs) == 1 and 'NOPASSWD' in msgs[0]
 
 
-def test_clock_overlay_for_video(tmp_path, monkeypatch):
-    """Over video the clock is blended into the stream as a cropped PNG."""
-    from PIL import Image
-    monkeypatch.setattr(NativeSlideshow, '_CLOCK_PNGS',
-                        (str(tmp_path / 'a.png'), str(tmp_path / 'b.png')))
+def test_clock_overlay_for_video(tmp_path):
+    """Over video the clock is a cropped RGBA picture for its own DRM plane;
+    the video pipeline itself stays untouched (zero-copy)."""
     for orient in ('horizontal', 'vertical'):
         s = show(tmp_path, 'setup_complete: true\nframe: {orientation: %s}\n'
                            'clock: {enabled: true, size: l, position: br}\n' % orient)
-        path, x, y = s._clock_overlay_png()
-        w, h = Image.open(path).size
-        assert x % 2 == 0 and y % 2 == 0
-        assert x + w <= s.fb_w and y + h <= s.fb_h          # inside the video frame
-        desc = s._video_pipeline_desc('/x/a.mp4')
-        assert 'v4l2h264dec ! gdkpixbufoverlay name=clk' in desc and desc.endswith(
-            'kmssink force-modesetting=true')
-        # consecutive renders use different files, so `location` always reloads
-        assert s._clock_overlay_png()[0] != s._clock_overlay_png()[0]
+        im, x, y = s._clock_overlay_image()
+        assert im.mode == 'RGBA' and im.getbbox() == (0, 0) + im.size
+        assert x + im.size[0] <= s.fb_w and y + im.size[1] <= s.fb_h
+        assert im.size[0] * im.size[1] < s.fb_w * s.fb_h / 8   # small, not a full frame
+        assert s._video_pipeline_desc('/x/a.mp4').endswith(
+            'v4l2h264dec ! kmssink force-modesetting=true')
+        assert s._video_pipeline_desc('/x/a.mp4', 7).endswith(
+            'kmssink force-modesetting=true fd=7')
     off = show(tmp_path, 'setup_complete: true\nclock: {enabled: false}\n')
-    assert off._clock_overlay_png() is None
-    assert 'gdkpixbufoverlay' not in off._video_pipeline_desc('/x/a.mp4')
+    assert off._clock_overlay_image() is None
+    assert off._VideoClock(off).fd is None        # clock off: card is never opened
     broken = show(tmp_path, 'setup_complete: true\nclock: {enabled: true}\n')
     broken._overlay_broken = True
-    assert 'gdkpixbufoverlay' not in broken._video_pipeline_desc('/x/a.mp4')
+    assert broken._VideoClock(broken).fd is None
+    quiet = show(tmp_path, 'setup_complete: true\nclock: {enabled: true}\n')
+    c = quiet._VideoClock(quiet, want=False)
+    assert c.fd is None
+    c.tick(None); c.draw(); c.close()             # no-ops without an fd
+
+
+def test_drm_plane_pixels():
+    """KMS wants B,G,R,A bytes with colour premultiplied by alpha."""
+    from PIL import Image
+    from frame.display import drm_plane
+    im = Image.new('RGBA', (2, 1))
+    im.putpixel((0, 0), (255, 128, 0, 255))
+    im.putpixel((1, 0), (255, 255, 255, 128))
+    assert drm_plane.premultiplied_bgra(im) == bytes(
+        [0, 128, 255, 255, 128, 128, 128, 128])
+
