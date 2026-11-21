@@ -258,7 +258,7 @@ class EnergySaveManager:
         value = max(0, min(100, int(value)))
         self.brightness = value
         try:
-            subprocess.run(['sudo', 'ddcutil', 'setvcp', '10', str(value)],
+            subprocess.run(['sudo', '-n', 'ddcutil', 'setvcp', '10', str(value)],
                            capture_output=True, timeout=10)
         except Exception as e:
             logger.warning(f"Failed to set brightness: {e}")
@@ -295,7 +295,7 @@ class EnergySaveManager:
             subprocess.run(['wlopm', '--off', '*'],
                          capture_output=True, timeout=5, env=self._wayland_env())
         elif method == 'brightness':
-            subprocess.run(['sudo', 'ddcutil', 'setvcp', '10', '0'],
+            subprocess.run(['sudo', '-n', 'ddcutil', 'setvcp', '10', '0'],
                          capture_output=True, timeout=10)
         elif method == 'hdmi':
             subprocess.run(['wlr-randr', '--output', 'HDMI-A-1', '--off'],
@@ -307,9 +307,15 @@ class EnergySaveManager:
         None = unreachable (panel dropped off USB/DDC — the recurring
         over-current transient on this unit)."""
         try:
-            out = subprocess.run(['sudo', 'ddcutil', 'getvcp', 'd6'],
+            out = subprocess.run(['sudo', '-n', 'ddcutil', 'getvcp', 'd6'],
                                  capture_output=True, text=True, timeout=8)
             s = (out.stdout or '') + (out.stderr or '')
+            if (out.stderr or '').lstrip().startswith('sudo:'):
+                # sudo itself refused (no NOPASSWD rule for ddcutil's real path).
+                # That is a configuration fault, not a panel fault — say so,
+                # loudly and once, instead of reporting "panel unreachable".
+                self._warn_sudo(out.stderr.strip())
+                return None
             if 'Display not found' in s or 'communication failed' in s.lower():
                 return None
             if 'DPM: On' in s or 'sl=0x01' in s:
@@ -320,6 +326,18 @@ class EnergySaveManager:
             logger.debug("getvcp d6 failed: %s", e)
         return None
 
+    _sudo_warned = False
+
+    def _warn_sudo(self, msg):
+        if not EnergySaveManager._sudo_warned:
+            EnergySaveManager._sudo_warned = True
+            logger.error(
+                "ddcutil cannot run: sudo refused it (%s). The frame user needs "
+                "a NOPASSWD sudoers rule for the REAL path of ddcutil (see "
+                "`command -v ddcutil`, usually /usr/bin/ddcutil). Until that is "
+                "fixed, sleep cannot switch the backlight off and wake cannot "
+                "switch it back on.", msg)
+
     def _ddc_wake(self, retries=3):
         """Send the DDC wake (D6=1) and VERIFY the panel reports On. A single
         blind setvcp was unreliable: if the panel was asleep/half-dropped the
@@ -327,7 +345,7 @@ class EnergySaveManager:
         intervened. Retry a few times; if it still won't confirm, hand off to a
         background healer that keeps trying until the panel re-appears."""
         for _ in range(max(1, retries)):
-            subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '1'],
+            subprocess.run(['sudo', '-n', 'ddcutil', 'setvcp', 'd6', '1'],
                            capture_output=True, timeout=10)
             if self._display_is_on() is True:
                 return True
@@ -345,7 +363,7 @@ class EnergySaveManager:
         unreachable (dropped off USB) — in which case there is no backlight to
         worry about, so we stop retrying and just warn."""
         for _ in range(max(1, retries)):
-            subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '4'],
+            subprocess.run(['sudo', '-n', 'ddcutil', 'setvcp', 'd6', '4'],
                            capture_output=True, timeout=10)
             state = self._display_is_on()
             if state is False:
@@ -383,14 +401,25 @@ class EnergySaveManager:
                 time.sleep(60)
                 if self.sleeping:
                     return
-                subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '1'],
+                subprocess.run(['sudo', '-n', 'ddcutil', 'setvcp', 'd6', '1'],
                                capture_output=True, timeout=10)
                 if self._display_is_on() is True:
                     logger.info("Wake healer: panel back On after %d retr%s",
                                 attempt, 'y' if attempt == 1 else 'ies')
                     return
-            logger.warning("Wake healer: gave up after ~3h, panel still "
-                           "unreachable (needs physical power-cycle)")
+            # A frame that is supposed to be awake must never settle for a
+            # black panel: after the dense phase keep trying, just less often.
+            logger.warning("Wake healer: panel still not On after ~3h — "
+                           "continuing every 10 min")
+            while not self.sleeping:
+                time.sleep(600)
+                if self.sleeping:
+                    return
+                subprocess.run(['sudo', '-n', 'ddcutil', 'setvcp', 'd6', '1'],
+                               capture_output=True, timeout=10)
+                if self._display_is_on() is True:
+                    logger.info("Wake healer: panel back On (late recovery)")
+                    return
         finally:
             self._healing = False
 
@@ -415,7 +444,7 @@ class EnergySaveManager:
                 time.sleep(60)
                 if not self.sleeping:
                     return
-                subprocess.run(['sudo', 'ddcutil', 'setvcp', 'd6', '4'],
+                subprocess.run(['sudo', '-n', 'ddcutil', 'setvcp', 'd6', '4'],
                                capture_output=True, timeout=10)
                 if self._display_is_on() is False:
                     logger.info("Sleep healer: backlight confirmed off after "
@@ -436,7 +465,7 @@ class EnergySaveManager:
             subprocess.run(['wlopm', '--on', '*'],
                          capture_output=True, timeout=5, env=self._wayland_env())
         elif method == 'brightness':
-            subprocess.run(['sudo', 'ddcutil', 'setvcp', '10', '100'],
+            subprocess.run(['sudo', '-n', 'ddcutil', 'setvcp', '10', '100'],
                          capture_output=True, timeout=10)
         elif method == 'hdmi':
             subprocess.run(['wlr-randr', '--output', 'HDMI-A-1', '--on'],
