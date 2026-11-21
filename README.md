@@ -94,8 +94,11 @@ Raspberry Pi Zero 2 W
 
 ### Hardware
 - Raspberry Pi Zero 2 W (or any newer Pi).
-- Display with HDMI input (tested: ANMITE 14" 1920×1200 touchscreen).
-- Optional but recommended: a USB touchscreen for the on-device menu.
+- **LCD frame:** a display with HDMI input (tested: ANMITE 14" 1920×1200).
+  A touchscreen is **optional** — it adds the on-device menu, but the whole
+  setup and every setting also work from a phone.
+- **E-ink frame:** an SPI e-paper panel (Waveshare or Pimoroni Inky) and, for
+  battery use, a PiSugar. See [docs/EINK.md](docs/EINK.md).
 
 ### Software
 - Raspberry Pi OS Trixie (Debian 13), 64-bit.
@@ -121,10 +124,18 @@ only if you want to build from source.
    set your **WiFi**, **locale/timezone**, and enable **SSH** if you want
    remote access — these still apply on top of the image.
 3. Insert the card and power on. The first boot provisions itself (a few
-   minutes) and then shows the setup wizard.
-4. Configure your photo albums via the on-screen wizard — or, if no network
-   was set, connect to the **`mimir-Setup`** WiFi hotspot it creates and
-   follow the captive portal.
+   minutes).
+4. **Set it up from your phone** — the frame shows a QR code:
+   - *No Wi-Fi yet:* scan the code to join the frame's own **`mimir-Setup`**
+     network; the Wi-Fi page opens by itself. Pick your home Wi-Fi.
+   - *On your Wi-Fi:* scan the (new) code to open the setup wizard and add
+     your photo albums.
+
+   No touchscreen or keyboard is needed. On a touch frame you can instead tap
+   **“Hier am Rahmen weitermachen”** and use the on-device menu.
+
+For an **e-ink frame**, drop a `mimir.yaml` onto the boot partition before the
+first boot — see [docs/EINK.md](docs/EINK.md).
 
 - **Target:** 64-bit (arm64), **Raspberry Pi Zero 2 W or newer**.
 - **Login:** user `frame`, password `photoframe` — change it after first login
@@ -241,14 +252,24 @@ sudo systemctl enable --now photo_frame_server photo_frame_slideshow
 ```
 
 - `photo_frame_server` — the HTTP API, remote UI and setup wizard (`:8080`).
-- `photo_frame_slideshow` — the native renderer that owns the display.
+- `photo_frame_slideshow` — the native renderer that owns the display (LCD).
+- `photo_frame_eink` — the wake-draw-sleep cycle of the e-ink variant; enabled
+  *instead of* the slideshow when `variant: eink`.
 
 Sync runs on demand ("Sync Now" in the menu or phone remote) and automatically
 during sleep, when more RAM and CPU are free.
 
 ## The phone remote (`/remote`)
 
-Open **Settings → Fotoalben → QR** and scan the code:
+Open `http://mimir.local:8080/` with the frame's access token — easiest by
+scanning a QR code: the one on the setup screen, or **Settings → Fotoalben →
+QR** on a touch frame. Everything the on-device menu offers is here too, so a
+frame without a touchscreen loses nothing:
+
+- **Frame** — orientation, photo interval, brightness, clock (LCD); time and
+  number of pictures per day, date overlay, “new picture now” (e-ink).
+- **Sleep** — night schedule and “screen off for …” (LCD).
+- **System** — change Wi-Fi, restart, switch off.
 
 - **Synology Photos** — add/remove albums with share URL + passphrase.
 - **Google Photos** — add/remove shared-album URLs (no auth needed).
@@ -284,6 +305,10 @@ digital_photo_frame/
 │   ├── routes.py               # All HTTP endpoints
 │   ├── config.py               # AppState (config + shared state)
 │   ├── slideshow.py            # Native renderer (DRM/kmssink + framebuffer)
+│   ├── setup_screen.py         # "Set me up with your phone" screen (LCD + e-ink)
+│   ├── eink_cycle.py           # E-ink variant: wake → draw one picture → sleep
+│   ├── display/eink.py         # E-paper backends (Waveshare, Inky, simulator) + dithering
+│   ├── power/pisugar.py        # Battery + RTC wake alarm (PiSugar)
 │   ├── native_ui.py            # On-device touch settings menu
 │   ├── native_video.py         # Seamless GStreamer video loop
 │   ├── video.py                # Video transcode / rotation pipeline
@@ -299,8 +324,9 @@ digital_photo_frame/
 │   ├── setup.html              # WiFi captive-portal page
 │   └── wizard.html             # First-time setup wizard
 ├── systemd/                    # Unit files (server, slideshow, update, …)
-├── scripts/                    # prepare_sd.* · setup_pi.sh · deploy_update.sh · update.sh
-├── docs/                       # screenshots, monetization notes
+├── scripts/                    # prepare_sd.* · setup_pi.sh · setup_eink.sh · deploy_update.sh · update.sh
+├── tests/                      # pytest suite (no hardware needed)
+├── docs/                       # EINK.md, CONNECT.md, screenshots, monetization notes
 └── config_frame.yaml           # Per-frame configuration
 ```
 
@@ -311,8 +337,11 @@ network-online.target
   → photo_frame_update.service    (git pull + pip install, fail-ok)
     → photo_frame_server.service  (frame.server, HTTP :8080)
         IF no WiFi            → hotspot "mimir-Setup" + captive portal
-        IF setup_complete=false → setup wizard
-    → photo_frame_slideshow.service  (frame.slideshow owns the display)
+        IF setup_complete=false → setup wizard (opened from a phone)
+    → photo_frame_slideshow.service  (LCD: frame.slideshow owns the display)
+        IF setup_complete=false → QR screen: join hotspot → open wizard
+      or
+    → photo_frame_eink.service       (e-ink: draw one picture, arm RTC, power off)
 ```
 
 ## Troubleshooting
@@ -331,6 +360,21 @@ wlopm --off '*'            ;  wlopm --on '*'               # DPMS
 sudo ddcutil setvcp 10 0   ;  sudo ddcutil setvcp 10 80    # brightness
 ```
 
+**Screen stays black after the night / backlight stays on in sleep**
+
+The backlight is switched over DDC/CI with `sudo ddcutil`. If the frame user
+has no password-less sudo rule for ddcutil's *real* path, those calls fail
+unattended and only work for a few minutes after someone ran `sudo` by hand —
+which looks exactly like a flaky panel. The server log then says
+`ddcutil cannot run: sudo refused it`. Check and fix:
+```bash
+sudo -k; sudo -n ddcutil getvcp d6     # must print the power mode, not ask for a password
+echo "frame ALL=(ALL) NOPASSWD: $(command -v ddcutil)" | sudo tee /etc/sudoers.d/photo-frame-ddcutil
+sudo chmod 440 /etc/sudoers.d/photo-frame-ddcutil && sudo visudo -c
+```
+(Frames set up before November 2026 have the wrong path `/usr/sbin/ddcutil` in
+`/etc/sudoers.d/photo-frame`; `setup_pi.sh` now resolves the real one.)
+
 **No photos displaying**
 ```bash
 ls /srv/frame/photos/horizontal/ | wc -l
@@ -338,6 +382,16 @@ ls /srv/frame/photos/vertical/   | wc -l
 grep orientation config_frame.yaml
 sudo systemctl restart photo_frame_slideshow
 ```
+
+## Tests
+
+```bash
+pip install Pillow numpy PyYAML segno pytest
+pytest tests
+```
+
+The suite needs no Pi: the e-ink cycle runs against a simulated panel, a fake
+PiSugar and a fake frame server.
 
 ## License
 

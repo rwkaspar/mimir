@@ -22,10 +22,21 @@ zeigt sie als Vollbild-Diashow.
    Im Anpassungsdialog **WLAN**, **Sprache/Zeitzone** setzen und bei Bedarf
    **SSH aktivieren**. Diese Einstellungen gelten zusätzlich zum Image.
 3. **Karte einlegen und Pi einschalten.** Der erste Start richtet sich selbst
-   ein (ein paar Minuten) und zeigt dann den Einrichtungs-Assistenten.
-4. **Alben einrichten** über den Assistenten am Bildschirm. Falls kein WLAN
-   gesetzt wurde, spannt der Rahmen ein WLAN **`mimir-Setup`** auf —
-   damit verbinden und der Anleitung im Browser folgen.
+   ein (ein paar Minuten).
+4. **Mit dem Handy einrichten** — der Rahmen zeigt einen QR-Code:
+   - *Noch kein WLAN:* Code scannen, das Handy verbindet sich mit dem WLAN
+     **`mimir-Setup`** des Rahmens, die WLAN-Seite öffnet sich von selbst.
+     Dort das Heim-WLAN auswählen.
+   - *Im Heim-WLAN:* den (neuen) Code scannen, der Einrichtungs-Assistent
+     öffnet sich. Dort die Fotoalben hinzufügen.
+
+   Ein Touchscreen ist nicht nötig. Mit Touch geht es alternativ über
+   **„Hier am Rahmen weitermachen“** direkt am Rahmen.
+
+Alle Einstellungen gibt es danach auch am Handy: denselben QR-Code scannen oder
+`http://mimir.local:8080/` öffnen.
+
+**E-Ink-Rahmen** (stromsparend, mit Akku): siehe [docs/EINK.md](docs/EINK.md).
 
 **Zugang:** Benutzer `frame`, Passwort `photoframe` — nach dem ersten Login
 mit `passwd` ändern. Bei aktiviertem SSH erreichbar unter `mimir.local`.
