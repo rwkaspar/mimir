@@ -63,7 +63,7 @@ UNIT
 systemctl enable photo-frame-bootstrap.service
 
 # ---- Runtime trim: disable background services the frame doesn't need, so a
-# 512 MB Pi Zero 2 W keeps RAM/CPU for Chromium. avahi is kept on purpose
+# 512 MB Pi Zero 2 W keeps RAM/CPU for the slideshow. avahi is kept on purpose
 # (hostname.local for SSH). NetworkManager is required (WiFi/hotspot).
 for unit in bluetooth hciuart triggerhappy ModemManager \
             apt-daily.timer apt-daily-upgrade.timer \

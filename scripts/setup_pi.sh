@@ -29,6 +29,23 @@ die() {
 log "=== Photo Frame Setup ==="
 log "User: ${FRAME_USER}, Repo: ${REPO_DIR}"
 
+# ---- Variant: lcd (HDMI panel, native slideshow) or eink (SPI e-paper) ----
+# Chosen BEFORE first boot by dropping a `mimir.yaml` onto the boot partition
+# (e.g. `variant: eink` plus an `eink:` section) — it is merged into the config
+# further down. On a re-run the existing config wins.
+BOOT_OVERRIDE="/boot/firmware/mimir.yaml"
+read_variant() {
+    local v=""
+    for f in "${REPO_DIR}/config_frame.yaml" "$BOOT_OVERRIDE"; do
+        if [ -z "$v" ] && [ -f "$f" ]; then
+            v="$(grep -E '^variant:' "$f" 2>/dev/null | head -1 | awk '{print $2}' | tr -d "\"'\r")"
+        fi
+    done
+    [ "$v" = "eink" ] && echo eink || echo lcd
+}
+VARIANT="$(read_variant)"
+log "Variant: ${VARIANT}"
+
 # ---- Verify ----
 if [ "$(id -u)" -ne 0 ]; then
     die "must run as root"
@@ -60,7 +77,7 @@ SCREEN
 
 # ---- Desktop display manager conflict handling ----
 # On desktop-based Pi OS images a running display manager occupies DRM/seat0,
-# which puts photo_frame_cage into a restart loop ("Could not take device",
+# which keeps the slideshow from taking the display ("Could not take device",
 # "Found 0 GPUs"). Disable any display manager and boot to multi-user.target.
 # (Contributed idea from @romanlehmann, PR #3.)
 DISPLAY_MANAGERS=(
@@ -87,7 +104,7 @@ assert_no_display_manager_conflict() {
         systemctl is-active "$dm" >/dev/null 2>&1 && active_dms+=("$dm")
     done
     if [ "${#active_dms[@]}" -gt 0 ]; then
-        die "desktop display manager still active (${active_dms[*]}). This blocks DRM/seat0 for photo_frame_cage. Disable it (e.g. sudo systemctl disable --now lightdm) and rerun setup."
+        die "desktop display manager still active (${active_dms[*]}). This blocks the display for the slideshow. Disable it (e.g. sudo systemctl disable --now lightdm) and rerun setup."
     fi
 }
 
@@ -139,7 +156,22 @@ if ! ping -c 1 -W 5 8.8.8.8 &>/dev/null; then
 fi
 
 # ---- System packages (with retry) ----
-PACKAGES="git python3-venv python3-dev labwc wlr-randr wlopm swaybg seatd cog gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-gl ddcutil i2c-tools network-manager dnsmasq-base iptables qrencode libjpeg-dev zlib1g-dev libffi-dev libheif-dev fonts-noto-color-emoji ffmpeg plymouth plymouth-themes"
+# The display runs natively (frame/slideshow.py -> /dev/fb0 + GStreamer kmssink)
+# under the SYSTEM python3, so its deps come from apt, not the venv: python3-gi +
+# the GStreamer introspection data (seamless video loop), python3-pil/-numpy
+# (menu, clock, boot splash), python3-yaml, a TrueType font and gst-launch.
+# No browser, no Wayland compositor: cog/labwc/swaybg/seatd are gone.
+PACKAGES_COMMON="git python3-venv python3-dev python3-yaml python3-pil python3-numpy fonts-dejavu-core network-manager dnsmasq-base iptables qrencode libjpeg-dev zlib1g-dev libffi-dev libheif-dev ffmpeg fake-hwclock"
+PACKAGES_LCD="python3-gi gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad ddcutil i2c-tools plymouth plymouth-themes"
+# E-ink: SPI + GPIO bindings for the panel driver (Waveshare lib / Inky).
+PACKAGES_EINK="python3-spidev python3-gpiozero python3-lgpio python3-pip"
+if [ "$VARIANT" = "eink" ]; then
+    PACKAGES="$PACKAGES_COMMON $PACKAGES_EINK"
+    CRITICAL_PKGS="python3-dev python3-yaml python3-pil python3-numpy libheif-dev python3-spidev python3-gpiozero"
+else
+    PACKAGES="$PACKAGES_COMMON $PACKAGES_LCD"
+    CRITICAL_PKGS="python3-dev python3-yaml python3-pil python3-numpy python3-gi gir1.2-gstreamer-1.0 gstreamer1.0-tools gstreamer1.0-plugins-bad libheif-dev ddcutil ffmpeg fonts-dejavu-core"
+fi
 
 MISSING_PKGS=""
 for pkg in $PACKAGES; do
@@ -164,7 +196,7 @@ if [ -n "$MISSING_PKGS" ]; then
             install_packages || log "ERROR: apt-get install failed after 3 attempts"
         fi
     fi
-    for pkg in python3-dev labwc cog seatd libheif-dev wlr-randr wlopm fonts-noto-color-emoji ddcutil ffmpeg; do
+    for pkg in $CRITICAL_PKGS; do
         if ! dpkg -s "$pkg" &>/dev/null; then
             log "WARNING: $pkg missing, attempting individual install..."
             apt-get install -y "$pkg" 2>&1 | tee -a "$SETUP_LOG" || log "WARNING: could not install $pkg"
@@ -180,6 +212,20 @@ log "Configuring timezone and NTP..."
 timedatectl set-timezone Europe/Berlin 2>/dev/null || true
 timedatectl set-ntp true 2>/dev/null || true
 
+# ---- Persistent journal ----
+# Storage=auto silently falls back to /run (RAM) when /var/log/journal is
+# missing, so every reboot wiped the logs — and with them the reason for any
+# overnight fault. Keep a bounded on-disk journal instead.
+mkdir -p /etc/systemd/journald.conf.d /var/log/journal
+cat > /etc/systemd/journald.conf.d/persistent.conf << 'EOF'
+[Journal]
+Storage=persistent
+SystemMaxUse=200M
+MaxRetentionSec=1year
+EOF
+systemd-tmpfiles --create --prefix /var/log/journal 2>/dev/null || true
+systemctl restart systemd-journald 2>/dev/null || true
+
 # ---- i2c-dev module (needed for ddcutil / DDC/CI backlight control) ----
 if ! grep -q "i2c-dev" /etc/modules-load.d/i2c-dev.conf 2>/dev/null; then
     echo "i2c-dev" > /etc/modules-load.d/i2c-dev.conf
@@ -189,6 +235,10 @@ modprobe i2c-dev 2>/dev/null || true
 # ---- User groups ----
 echo "Setting up user groups..."
 usermod -aG video,input,render,netdev,i2c "${FRAME_USER}"
+# spi/gpio exist on Raspberry Pi OS; needed by the e-ink panel driver.
+for grp in spi gpio; do
+    getent group "$grp" >/dev/null 2>&1 && usermod -aG "$grp" "${FRAME_USER}"
+done
 
 # ---- Photos directory ----
 echo "Creating photos directory..."
@@ -238,6 +288,7 @@ if [ ! -f "${REPO_DIR}/config_frame.yaml" ]; then
     echo "Creating default config..."
     cat > "${REPO_DIR}/config_frame.yaml" << 'YAML'
 setup_complete: false
+variant: lcd          # lcd = HDMI panel + native slideshow, eink = SPI e-paper
 frame:
   name: photo-frame
   orientation: horizontal
@@ -299,10 +350,20 @@ YAML
     chown "${FRAME_USER}:${FRAME_USER}" "${REPO_DIR}/config_frame.yaml"
 fi
 
-# ---- labwc config (uses XDG_CONFIG_HOME pointed at repo dir) ----
-echo "Configuring labwc..."
-# autostart uses XDG_CONFIG_HOME (set by cage service) for dynamic path detection
-chmod +x "${REPO_DIR}/labwc/autostart"
+# ---- Merge boot-partition overrides (variant, e-ink panel, frame name, ...) ----
+# `mimir.yaml` on the boot (FAT) partition is deep-merged into the config once
+# and then renamed, so later edits in the UI are never overwritten by it.
+if [ -f "$BOOT_OVERRIDE" ]; then
+    log "Merging ${BOOT_OVERRIDE} into config..."
+    if python3 "${REPO_DIR}/scripts/merge_config.py" "${REPO_DIR}/config_frame.yaml" "$BOOT_OVERRIDE" 2>&1 | tee -a "$SETUP_LOG"; then
+        mv -f "$BOOT_OVERRIDE" "${BOOT_OVERRIDE}.applied" 2>/dev/null || true
+    else
+        log "WARNING: could not merge ${BOOT_OVERRIDE} (left in place)"
+    fi
+    chown "${FRAME_USER}:${FRAME_USER}" "${REPO_DIR}/config_frame.yaml"
+    VARIANT="$(read_variant)"
+    log "Variant after merge: ${VARIANT}"
+fi
 
 # ---- Systemd services ----
 show "Configuring services..."
@@ -327,14 +388,16 @@ StandardError=journal
 WantedBy=multi-user.target
 EOF
 
-cat > /etc/systemd/system/photo_frame_cage.service << EOF
+# The display owner. Exactly one of these is enabled, by variant.
+#
+# LCD: the native slideshow owns the panel directly (DRM/kmssink + fbcon) — no
+# browser, no compositor. It runs under the SYSTEM python3 (python3-gi/GStreamer
+# for the seamless video loop are apt packages; the venv has no gi).
+cat > /etc/systemd/system/photo_frame_slideshow.service << EOF
 [Unit]
-Description=Digital Photo Frame Viewer (labwc + cog/WPE)
+Description=mimir native slideshow (photos + videos, no browser)
 After=network.target photo_frame_server.service
 Wants=photo_frame_server.service
-# Re-hide the pointer cursor on every cage start (boot AND wake-from-sleep):
-# cog relaunches and the cursor reappears, so pull the oneshot in each time.
-Wants=photo_frame_cursor_hide.service
 Conflicts=display-manager.service
 
 [Service]
@@ -342,17 +405,11 @@ Type=simple
 User=${FRAME_USER}
 SupplementaryGroups=video input render
 TTYPath=/dev/tty1
-Environment="XDG_RUNTIME_DIR=/tmp/frame-runtime"
-Environment="XDG_CONFIG_HOME=${REPO_DIR}"
-Environment="XCURSOR_PATH=${REPO_DIR}/labwc/icons"
-Environment="XCURSOR_THEME=empty"
-Environment="XCURSOR_SIZE=1"
-ExecStartPre=/bin/mkdir -p /tmp/frame-runtime
-ExecStartPre=/bin/chmod 700 /tmp/frame-runtime
-ExecStartPre=/bin/sleep 5
-ExecStartPre=+${REPO_DIR}/scripts/set_touch_cal.sh
+WorkingDirectory=${REPO_DIR}
+# Quit Plymouth so it releases the DRM master before the slideshow grabs it.
+# ('+' = run as root; ExecStartPre otherwise runs as User=.)
 ExecStartPre=+-/usr/bin/plymouth quit
-ExecStart=/usr/bin/labwc -s /bin/true
+ExecStart=/usr/bin/python3 -m frame.slideshow ${REPO_DIR}/config_frame.yaml
 Restart=on-failure
 RestartSec=10
 
@@ -360,25 +417,56 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
 
-# Hide the pointer cursor: the USB touch panel presents as a mouse so wlroots
-# draws a cursor, and WPE/cog doesn't honour the empty cursor theme. A single
-# synthetic touch tap after the kiosk is up makes wlroots hide the pointer.
-# Runs as root (no User=) because /dev/uinput requires it.
-cat > /etc/systemd/system/photo_frame_cursor_hide.service << EOF
+# E-ink: wake -> sync -> draw one image -> set the RTC alarm -> power off.
+# Stays up instead (redrawing on a timer) while in setup mode, on external power
+# or without a PiSugar. See frame/eink_cycle.py.
+cat > /etc/systemd/system/photo_frame_eink.service << EOF
 [Unit]
-Description=Hide mouse cursor on the kiosk (synthetic touch tap)
-After=photo_frame_cage.service
-Wants=photo_frame_cage.service
+Description=mimir e-ink cycle (draw one image, then sleep)
+After=network.target photo_frame_server.service
+Wants=photo_frame_server.service
 
 [Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 ${REPO_DIR}/scripts/cursor_hide_touch.py
-StandardOutput=journal
-StandardError=journal
+Type=simple
+User=${FRAME_USER}
+SupplementaryGroups=spi gpio i2c
+WorkingDirectory=${REPO_DIR}
+Environment="PYTHONPATH=/opt/mimir-eink"
+ExecStart=/usr/bin/python3 -m frame.eink_cycle ${REPO_DIR}/config_frame.yaml
+Restart=on-failure
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Diagnostic logger for the USB touch panel's presence (LCD builds). Harmless
+# without a touch panel.
+cat > /etc/systemd/system/touch-watch.service << EOF
+[Unit]
+Description=Touch USB presence watchdog (diagnostic logging)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=${REPO_DIR}/scripts/touch-watch.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Retire the old browser kiosk (labwc + cog) if an earlier setup installed it:
+# it and the native slideshow both need the DRM master and must never co-run.
+for old in photo_frame_cage photo_frame_cursor_hide; do
+    if [ -f "/etc/systemd/system/${old}.service" ]; then
+        log "Removing retired unit ${old}.service"
+        systemctl disable --now "${old}.service" 2>/dev/null || true
+        rm -f "/etc/systemd/system/${old}.service"
+        rm -rf "/etc/systemd/system/${old}.service.d"
+    fi
+done
 
 cat > /etc/systemd/system/photo_frame_update.service << EOF
 [Unit]
@@ -427,16 +515,25 @@ EOF
 
 # ---- Sudoers (iptables for captive portal) ----
 echo "Setting up sudoers..."
+# sudo matches a rule against the command's REAL path. ddcutil is /usr/bin/ddcutil
+# on Debian; an earlier version of this file named /usr/sbin/ddcutil, a path that
+# does not exist — so the rule never matched and every backlight/standby call
+# only worked while some earlier interactive `sudo` had left a cached password
+# behind (Raspberry Pi OS sets timestamp_type=global). Unattended, sleep and
+# wake then failed with "a password is required", which looked exactly like a
+# flaky DDC bus. Resolve the real paths instead of guessing them.
+DDCUTIL_BIN="$(command -v ddcutil 2>/dev/null || echo /usr/bin/ddcutil)"
+IPTABLES_BIN="$(command -v iptables 2>/dev/null || echo /usr/sbin/iptables)"
 cat > /etc/sudoers.d/photo-frame << EOF
-${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/sbin/iptables
-${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/sbin/ddcutil
-${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/wlopm
-${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl stop photo_frame_cage
-${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl start photo_frame_cage
-${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart photo_frame_cage
+${FRAME_USER} ALL=(ALL) NOPASSWD: ${IPTABLES_BIN}
+${FRAME_USER} ALL=(ALL) NOPASSWD: ${DDCUTIL_BIN}
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl stop photo_frame_slideshow
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl start photo_frame_slideshow
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart photo_frame_slideshow
+${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl stop photo_frame_eink
+${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl start photo_frame_eink
+${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart photo_frame_eink
+${FRAME_USER} ALL=(ALL) NOPASSWD: /sbin/poweroff
 ${FRAME_USER} ALL=(ALL) NOPASSWD: ${REPO_DIR}/scripts/install_bootsplash.sh
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/dd
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/setterm
@@ -446,6 +543,7 @@ ${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/tailscale up *
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/sh -c curl -fsSL https\://tailscale.com/install.sh | sh
 EOF
 chmod 440 /etc/sudoers.d/photo-frame
+visudo -c -f /etc/sudoers.d/photo-frame >/dev/null 2>&1 || log "WARNING: sudoers file failed validation"
 
 # ---- Quiet boot ----
 echo "Configuring quiet boot..."
@@ -457,9 +555,9 @@ if [ -f "$CMDLINE" ]; then
             sed -i "s/$/ $param/" "$CMDLINE"
         fi
     done
-    # Move the boot console off tty1 (the VT the kiosk takes over) so kernel
+    # Move the boot console off tty1 (the VT the slideshow takes over) so kernel
     # and systemd messages never appear where the frame will be — tty1 stays
-    # black until cage starts. Debug console remains on tty3 (Ctrl+Alt+F3).
+    # black until the display starts. Debug console remains on tty3.
     sed -i "s/console=tty1/console=tty3/" "$CMDLINE"
 fi
 
@@ -470,7 +568,7 @@ if [ -f "$CONFIG" ] && ! grep -q "^disable_splash=1" "$CONFIG"; then
 fi
 
 # ---- Boot splash (Plymouth: logo + spinner, rotated to the orientation) ----
-if [ -f "${REPO_DIR}/scripts/install_bootsplash.sh" ]; then
+if [ "$VARIANT" != "eink" ] && [ -f "${REPO_DIR}/scripts/install_bootsplash.sh" ]; then
     echo "Installing boot splash..."
     bash "${REPO_DIR}/scripts/install_bootsplash.sh" "" "${REPO_DIR}/config_frame.yaml" \
         || echo "WARNING: boot splash install failed (non-fatal)"
@@ -483,11 +581,24 @@ systemctl disable getty@tty1 2>/dev/null || true
 deactivate_display_manager
 assert_no_display_manager_conflict
 
+# ---- E-ink extras: SPI on + the panel driver library ----
+if [ "$VARIANT" = "eink" ]; then
+    show "Preparing e-ink panel..."
+    bash "${REPO_DIR}/scripts/setup_eink.sh" "${REPO_DIR}/config_frame.yaml" 2>&1 | tee -a "$SETUP_LOG" \
+        || log "WARNING: e-ink setup reported errors (see above)"
+fi
+
 # ---- Enable services ----
 show "Almost done..."
 systemctl daemon-reload
-systemctl enable seatd photo_frame_server photo_frame_cage photo_frame_cursor_hide.service photo_frame_update.service photo_frame_update.timer
-systemctl start seatd 2>/dev/null || true
+systemctl enable photo_frame_server photo_frame_update.service photo_frame_update.timer
+if [ "$VARIANT" = "eink" ]; then
+    systemctl disable photo_frame_slideshow touch-watch 2>/dev/null || true
+    systemctl enable photo_frame_eink
+else
+    systemctl disable photo_frame_eink 2>/dev/null || true
+    systemctl enable photo_frame_slideshow touch-watch
+fi
 
 # ---- Set repo ownership ----
 chown -R "${FRAME_USER}:${FRAME_USER}" "${REPO_DIR}"
@@ -504,30 +615,17 @@ su - "${FRAME_USER}" -c "cd ${REPO_DIR} && git branch -m master main 2>/dev/null
 # ---- Configure git safe directory (for auto-update as frame_user) ----
 su - "${FRAME_USER}" -c "git config --global --add safe.directory ${REPO_DIR}" 2>/dev/null || true
 
-# ---- Touchscreen check (wait if not detected, first run only) ----
+# ---- Touchscreen (optional) ----
+# A touch panel is NOT required: the whole setup runs from a phone (the frame
+# shows a QR code), the on-panel menu is an extra for touch builds. So never
+# block here — an earlier version waited for a USB replug and could hang the
+# first boot for half an hour on a panel that enumerated late.
 TOUCH_ID="27c0:0859"
-if ! lsusb | grep -q "$TOUCH_ID"; then
-    if [ -f "${FRAME_HOME}/.photo-frame-setup-done" ]; then
-        log "No touchscreen detected (re-run, skipping wait)."
+if [ "$VARIANT" != "eink" ]; then
+    if lsusb 2>/dev/null | grep -q "$TOUCH_ID"; then
+        log "Touchscreen detected."
     else
-        log "No touchscreen detected, waiting for USB replug..."
-        cat > /dev/tty1 2>/dev/null << 'SCREEN' || true
-
-
-        ==========================================
-
-           No touchscreen detected!
-
-           Please unplug and replug the
-           screen's USB cable, then wait...
-
-        ==========================================
-SCREEN
-        while ! lsusb | grep -q "$TOUCH_ID"; do
-            sleep 2
-        done
-        log "Touchscreen found!"
-        sleep 1
+        log "No touchscreen detected — continuing (setup works from the phone)."
     fi
 fi
 
