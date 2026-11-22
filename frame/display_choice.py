@@ -58,11 +58,26 @@ def can_switch():
     if not os.path.exists(SWITCH_SCRIPT):
         return False
     try:
-        r = subprocess.run(['sudo', '-n', '-l', SWITCH_SCRIPT],
-                           capture_output=True, timeout=10)
-        return r.returncode == 0
+        r = subprocess.run(['sudo', '-n', '-l'], capture_output=True,
+                           text=True, timeout=10)
     except Exception:
         return False
+    return has_nopasswd_rule(r.stdout, SWITCH_SCRIPT)
+
+
+def has_nopasswd_rule(sudo_listing, script):
+    """Is there an explicit NOPASSWD rule for `script` in `sudo -l` output?
+
+    Deliberately NOT "does `sudo -n <script>` work right now": Raspberry Pi OS
+    caches a sudo password for every process of the user for 15 minutes, so
+    that test passes on any install whenever someone has just used sudo.
+    """
+    for line in (sudo_listing or '').splitlines():
+        if 'NOPASSWD:' in line:
+            cmds = line.split('NOPASSWD:', 1)[1]
+            if script in [c.strip() for c in cmds.split(',')]:
+                return True
+    return False
 
 
 def options(config, hdmi=None, switchable=None):
@@ -115,6 +130,10 @@ def apply(config, config_path, data, run_switch=None):
     changed = want != cur or (want == 'eink' and (
         eink.get('driver') != old_eink.get('driver')
         or eink.get('pisugar_model') != old_eink.get('pisugar_model')))
+    if changed and (config or {}).get('setup_complete'):
+        # A frame in use is never rebuilt by a web request: this endpoint is
+        # the wizard's. Later changes go through scripts/switch_variant.sh.
+        return {'ok': False, 'error': 'setup_complete', 'restart': False}
     if changed and not (can_switch() if run_switch is None else True):
         return {'ok': False, 'error': 'cannot_switch', 'restart': False}
 

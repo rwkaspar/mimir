@@ -101,3 +101,26 @@ def test_without_the_root_helper_nothing_is_changed(tmp_path, monkeypatch):
     res = dc.apply(cfg, path, {'variant': 'eink', 'driver': 'inky'})
     assert res == {'ok': False, 'error': 'cannot_switch', 'restart': False}
     assert yaml.safe_load(open(path)) == {'variant': 'lcd'} and cfg == {'variant': 'lcd'}
+
+
+def test_a_set_up_frame_is_never_switched_by_a_request(tmp_path):
+    """Found the hard way on the live frame: a probe POST rebuilt it."""
+    cfg = {'variant': 'lcd', 'setup_complete': True}
+    path = cfg_file(tmp_path, cfg)
+    ran = []
+    res = dc.apply(cfg, path, {'variant': 'eink', 'driver': 'inky'}, run_switch=ran.append)
+    assert res == {'ok': False, 'error': 'setup_complete', 'restart': False}
+    assert ran == [] and yaml.safe_load(open(path)) == cfg
+    assert dc.apply(cfg, path, {'variant': 'lcd'}, run_switch=ran.append)['ok'] is True
+
+
+def test_can_switch_needs_an_explicit_rule_not_a_cached_password():
+    script = '/home/frame/digital_photo_frame/scripts/switch_variant.sh'
+    listing = """User frame may run the following commands on mimir:
+    (ALL : ALL) ALL
+    (ALL) NOPASSWD: /usr/bin/ddcutil
+    (ALL) NOPASSWD: /home/frame/digital_photo_frame/scripts/install_bootsplash.sh
+"""
+    assert dc.has_nopasswd_rule(listing, script) is False      # (ALL) ALL is not enough
+    assert dc.has_nopasswd_rule(listing + '    (ALL) NOPASSWD: ' + script + '\n', script)
+    assert dc.has_nopasswd_rule('', script) is False

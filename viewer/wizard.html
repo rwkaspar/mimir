@@ -887,7 +887,7 @@
             btn.disabled = false;
             if (!res.ok) {
                 document.getElementById('display-msg').innerHTML = '<div class="status-msg error">' +
-                    esc(res.error === 'cannot_switch' ? t('display_cannot') : (res.error || 'Error')) + '</div>';
+                    esc((res.error === 'cannot_switch' || res.error === 'setup_complete') ? t('display_cannot') : (res.error || 'Error')) + '</div>';
                 return;
             }
             if (!res.restart) { loadVariant().then(function() { showStep(2); }); return; }
