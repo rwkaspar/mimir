@@ -38,7 +38,8 @@ class FakeFrame:
                 if p == '/api/wifi/status':
                     self._send(outer.wifi)
                 elif p == '/api/access':
-                    self._send({'token': 'TOKEN', 'ips': ['192.168.1.50']})
+                    self._send({'token': 'TOKEN', 'ips': ['192.168.1.50'],
+                                'urls': ['http://192.168.1.50:8080/remote?token=TOKEN']})
                 elif p == '/api/qrcode':
                     self._send({'modules': [[1, 0, 1], [0, 1, 0], [1, 0, 1]]})
                 elif p == '/sync/status':
@@ -225,3 +226,30 @@ def test_torn_config_read_is_not_mistaken_for_first_run(frame):
     c = make(frame)
     frame.cfg_path.write_text('')
     assert c.setup_state() == 'unknown'
+
+
+def test_manual_wake_shows_the_remote_code_before_the_photo(frame):
+    """Switched on by hand, on Wi-Fi: the phone-remote QR first, then a photo."""
+    c = make(frame)
+    c.pisugar = lambda: None
+    keys = []
+    push = c.push
+    c.push = lambda img, key=None: (keys.append(key), push(img, key=key))[1]
+    c.run_once()                                            # no next_wake = manual
+    assert [k[0] for k in keys] == ['setup', 'photo'] and keys[0][1] == 'remote'
+    assert keys[0][3] == 'http://192.168.1.50:8080/remote?token=TOKEN'
+
+
+@pytest.mark.parametrize('case', ['scheduled', 'disabled'])
+def test_no_remote_code_on_a_scheduled_wake_or_when_switched_off(frame, case):
+    if case == 'disabled':
+        set_cfg(frame, lambda cfg: cfg['eink'].update(remote_qr=False))
+    c = make(frame)
+    c.pisugar = lambda: None
+    if case == 'scheduled':
+        c.save_state(next_wake=__import__('time').time())
+    keys = []
+    push = c.push
+    c.push = lambda img, key=None: (keys.append(key), push(img, key=key))[1]
+    c.run_once()
+    assert [k[0] for k in keys] == ['photo']

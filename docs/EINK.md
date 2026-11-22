@@ -75,6 +75,8 @@ black/white, `palette:` (`bw`, `bwr`, `bwy`, `7color`, `spectra6`).
 | `saturation` / `contrast` | `1.3` / `1.1` | lift before dithering — e-paper is paler than an LCD |
 | `flip` | `false` | panel mounted upside down |
 | `manual_awake_minutes` | `10` | how long the frame stays reachable after you switch it on by hand |
+| `remote_qr` | `true` | switched on by hand: show the QR code for the phone remote first, then the photo |
+| `remote_qr_minutes` | `5` | how long that code stays when the frame is not on battery (on battery: `manual_awake_minutes`) |
 | `stay_awake` | `false` | never power off (development) |
 | `pisugar` | `true` | `false` ignores a PiSugar |
 
@@ -86,8 +88,9 @@ battery level, the last and the next picture.
 A battery frame is off almost all day. To change settings:
 
 - **Press the PiSugar button.** A wake that is not at the scheduled time is
-  taken as "someone wants something": the frame draws a new picture and stays
-  on Wi-Fi for `manual_awake_minutes`.
+  taken as "someone wants something": the frame shows the QR code for the
+  phone remote and stays on Wi-Fi for `manual_awake_minutes`, then draws a new
+  picture and goes back to sleep.
 - **Plug it in.** On external power it never switches off.
 - **No network at all?** Create an empty file `mimir-stay-awake` on the boot
   partition — the frame then stays up until you delete it.

@@ -61,6 +61,17 @@ TEXT = {
             'Fotoalben und Einstellungen am Handy festlegen.',
         ],
         'phone_touch': 'Hier am Rahmen weitermachen',
+        'remote_title': 'Einstellungen am Handy',
+        'remote_lead': 'Der Rahmen ist im WLAN „{ssid}“.',
+        'remote_steps': [
+            'Handy mit demselben WLAN verbinden.',
+            'Code mit der Handy-Kamera scannen.',
+            'Alben, Uhr, Schlafzeiten und mehr am Handy ändern.',
+        ],
+        'remote_foot': 'Dieser Code erscheint nach jedem Einschalten. '
+                       '{after}',
+        'remote_after_lcd': 'Die Fotos starten gleich von selbst.',
+        'remote_after_eink': 'Danach zeigt der Rahmen wieder ein Foto.',
         'done_title': 'WLAN nicht erreichbar',
         'done_lead': 'Der Rahmen findet sein WLAN nicht. So verbindest du ihn neu:',
         'skip': 'Überspringen',
@@ -86,6 +97,17 @@ TEXT = {
             'Choose photo albums and settings on the phone.',
         ],
         'phone_touch': 'Continue here on the frame',
+        'remote_title': 'Settings on your phone',
+        'remote_lead': 'The frame is on the Wi-Fi “{ssid}”.',
+        'remote_steps': [
+            'Connect your phone to the same Wi-Fi.',
+            'Scan the code with your phone camera.',
+            'Change albums, clock, sleep times and more on the phone.',
+        ],
+        'remote_foot': 'This code appears every time the frame is switched '
+                       'on. {after}',
+        'remote_after_lcd': 'The photos start by themselves in a moment.',
+        'remote_after_eink': 'After that the frame shows a photo again.',
         'done_title': 'Wi-Fi not reachable',
         'done_lead': 'The frame cannot find its Wi-Fi. To reconnect it:',
         'skip': 'Skip',
@@ -180,7 +202,9 @@ def render(size, stage, qr_modules=None, info=None, theme='dark', lang='de',
     """Draw the setup screen.
 
     size        (w, h) of the image, in the orientation it is read in
-    stage       'starting' | 'wifi' | 'phone' | 'wifi_lost'
+    stage       'starting' | 'wifi' | 'phone' | 'wifi_lost' | 'remote'
+                ('remote' = after setup: the code that opens the phone remote,
+                shown at power-on on a frame without a touchscreen)
     qr_modules  QR matrix (list of rows of 0/1) or None (drawn without a code)
     info        dict: ssid, password, url (hotspot page), for the text
     touch       True on a build with a working touch panel: adds the
@@ -218,6 +242,12 @@ def render(size, stage, qr_modules=None, info=None, theme='dark', lang='de',
         title, lead = tx['phone_title'], tx['phone_lead']
         steps = tx['phone_steps']
         foot = ''
+    elif stage == 'remote':
+        title, lead = tx['remote_title'], tx['remote_lead']
+        steps = tx['remote_steps']
+        info.setdefault('after', tx['remote_after_eink' if theme == 'light'
+                                    else 'remote_after_lcd'])
+        foot = tx['remote_foot']
     else:
         title, lead = tx['starting_title'], ''
         steps, foot = tx['starting_body'], ''

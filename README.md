@@ -266,6 +266,12 @@ scanning a QR code: the one on the setup screen, or **Settings → Fotoalben →
 QR** on a touch frame. Everything the on-device menu offers is here too, so a
 frame without a touchscreen loses nothing:
 
+A frame **without a touchscreen** shows that QR code for 30 seconds every time
+it is switched on (e-ink: when switched on by hand, for a few minutes) — unplug,
+plug in, scan. That is how a new phone gets to the settings later.
+`frame.remote_qr_on_boot: auto | always | never` (LCD) and
+`eink.remote_qr: true | false` control it.
+
 - **Frame** — orientation, photo interval, brightness, clock (LCD); time and
   number of pictures per day, date overlay, “new picture now” (e-ink).
 - **Sleep** — night schedule and “screen off for …” (LCD).

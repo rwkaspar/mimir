@@ -315,13 +315,23 @@ class EinkCycle:
         logger.info('Showing %s', os.path.basename(choice))
         return choice
 
-    def draw_setup(self, wifi):
+    def draw_setup(self, wifi, remote=False):
         """Draw the phone-setup screen for the current stage, if it changed.
         E-paper refreshes take 15–30 s and wear the panel, so never redraw an
-        unchanged screen and never more often than every 30 s."""
+        unchanged screen and never more often than every 30 s.
+
+        `remote`: after setup, on Wi-Fi — draw the code that opens the phone
+        remote instead (shown when the frame is switched on by hand)."""
         from frame import setup_screen
         info, qr_text = {}, None
-        if wifi is None:
+        if remote:
+            stage = 'remote'
+            urls = (self.api_get('/api/access') or {}).get('urls') or []
+            if not urls:
+                return
+            info = {'ssid': (wifi or {}).get('ssid') or 'WLAN'}
+            qr_text = urls[0]
+        elif wifi is None:
             stage = 'starting'
         elif wifi.get('mode') == 'hotspot':
             stage = 'wifi' if self.setup_state() != 'complete' else 'wifi_lost'
@@ -425,10 +435,12 @@ class EinkCycle:
         logger.info('Wake: %s', 'scheduled' if scheduled else 'manual / first')
 
         wifi = self.wait_for_server(int(e.get('server_wait_seconds', 90)))
+        fresh = False
         if self.setup_state() == 'incomplete':
             if not self.run_setup():
                 return None
             wifi = self.api_get('/api/wifi/status')
+            fresh = True                  # just set up from the phone: photo next
 
         ps = self.pisugar()
         self.fix_clock(ps)
@@ -437,7 +449,18 @@ class EinkCycle:
 
         online = bool(wifi) and wifi.get('mode') != 'hotspot'
         hint = False
+        remote = False
+        awake_done = False
         if online:
+            if (not scheduled and not fresh and e.get('remote_qr', True)
+                    and self.setup_state() == 'complete'):
+                # Switched on by hand: first show the code that opens the phone
+                # remote. This frame has no touchscreen and the remote needs
+                # the access token, so this is the way (back) into the settings.
+                self._last_draw = 0.0
+                self.draw_setup(wifi, remote=True)
+                remote = (bool(self._drawn_key)
+                          and self._drawn_key[:2] == ('setup', 'remote'))
             self.sync(int(e.get('sync_timeout_seconds', 240)))
         elif wifi and not scheduled and self.setup_state() == 'complete':
             # Switched on by hand and the frame cannot find its Wi-Fi: say how
@@ -446,11 +469,22 @@ class EinkCycle:
             self.draw_setup(wifi)
             hint = bool(self._drawn_key) and self._drawn_key[:2] == ('setup', 'wifi_lost')
 
+        if remote:
+            # On battery the code stays for the whole "reachable" window (the
+            # frame powers off after it); otherwise for a few minutes.
+            on_battery = ps is not None and plugged is False
+            minutes = float(e.get('manual_awake_minutes', 10) if on_battery
+                            else e.get('remote_qr_minutes', 5))
+            logger.info('Phone-remote code on the panel for %.0f min', minutes)
+            self._stop.wait(minutes * 60)
+            awake_done = on_battery
+
         if not hint:
             self.draw_photo(battery=battery)
 
         # A manual wake stays reachable for the phone for a while.
-        if not scheduled and ps is not None and plugged is False:
+        if (not scheduled and ps is not None and plugged is False
+                and not awake_done):
             minutes = float(e.get('manual_awake_minutes', 10))
             logger.info('Manual wake: staying up %.0f min for settings', minutes)
             self._stop.wait(minutes * 60)

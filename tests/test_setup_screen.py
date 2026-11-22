@@ -9,7 +9,7 @@ SIZES = [(1920, 1200), (1200, 1920), (800, 480), (480, 800), (600, 448),
 
 
 @pytest.mark.parametrize('size', SIZES)
-@pytest.mark.parametrize('stage', ['starting', 'wifi', 'phone', 'wifi_lost'])
+@pytest.mark.parametrize('stage', ['starting', 'wifi', 'phone', 'wifi_lost', 'remote'])
 @pytest.mark.parametrize('theme', ['dark', 'light'])
 def test_renders_everywhere(size, stage, theme):
     img, hits = ss.render(size, stage, QR, {'ssid': 'Heimnetz'}, theme=theme, touch=True)

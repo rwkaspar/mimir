@@ -109,3 +109,24 @@ def test_drm_plane_pixels():
     assert drm_plane.premultiplied_bgra(im) == bytes(
         [0, 128, 255, 255, 128, 128, 128, 128])
 
+
+def test_power_on_qr_only_without_touch(tmp_path, monkeypatch):
+    """`frame.remote_qr_on_boot`: auto = only when no touchscreen is attached."""
+    class UI:
+        touch = False
+
+        @classmethod
+        def touch_present(cls):
+            return cls.touch
+    auto = show(tmp_path, 'setup_complete: true\n')
+    auto._native_ui = UI
+    assert auto._boot_qr_wanted() is True
+    UI.touch = True
+    assert auto._boot_qr_wanted() is False
+    always = show(tmp_path, 'setup_complete: true\nframe: {remote_qr_on_boot: always}\n')
+    always._native_ui = UI
+    assert always._boot_qr_wanted() is True
+    UI.touch = False
+    never = show(tmp_path, 'setup_complete: true\nframe: {remote_qr_on_boot: never}\n')
+    never._native_ui = UI
+    assert never._boot_qr_wanted() is False

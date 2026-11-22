@@ -78,7 +78,9 @@ class NativeSlideshow:
         # go to its buttons and the hot corner is inert.
         self._setup_active = False
         self._setup_taps = collections.deque()
-        self._hint_pending = False   # show the Wi-Fi hint instead of the menu
+        # A screen to show instead of the menu on the next menu request:
+        # 'hint' (Wi-Fi lost) or 'remote' (power-on QR for the phone remote).
+        self._hint_pending = False
         # Target render size = panel, capped on weak boards.
         cap = LOW_MEM_MAX_DIM if low_memory else 10**9
         scale = min(1.0, cap / float(max(self.fb_w, self.fb_h)))
@@ -949,8 +951,8 @@ class NativeSlideshow:
         self._menu_req.clear()
         self._hold_req.clear()
         if self._hint_pending:
-            self._hint_pending = False
-            self._run_setup(hint_only=True)
+            mode, self._hint_pending = self._hint_pending, False
+            self._run_setup(mode=mode)
             return
         if not self._prep_menu():
             return
@@ -1081,6 +1083,7 @@ class NativeSlideshow:
     # it for this long, then carries on with the photos it has (an offline frame
     # must still be a photo frame). Cold boot only.
     WIFI_HINT_SECONDS = 90
+    REMOTE_QR_SECONDS = 30
     SETUP_POLL_SECONDS = 3.0
 
     def _setup_state(self):
@@ -1106,7 +1109,7 @@ class NativeSlideshow:
         lang = (self._cfg().get('frame', {}) or {}).get('language', 'de')
         return lang if lang in ('de', 'en') else 'de'
 
-    def _run_setup(self, hint_only=False):
+    def _run_setup(self, mode='setup'):
         """Show "set me up with your phone" until setup is complete.
 
         The frame is configured from a phone, so the panel just has to say how
@@ -1117,9 +1120,16 @@ class NativeSlideshow:
 
         State comes from the server over localhost (/api/wifi/status,
         /api/access, /api/qrcode) and the config file (`setup_complete`, which
-        the wizard flips). `hint_only` is the post-setup variant: a time-limited
-        "Wi-Fi not reachable" hint that only shows while the hotspot is up.
+        the wizard flips).
+
+        `mode` picks the variant: 'setup' (first run, stays until the wizard
+        completes), 'hint' (after setup: a time-limited "Wi-Fi not reachable"
+        screen, only while the hotspot is up) or 'remote' (after setup: the QR
+        that opens the phone remote, shown briefly at power-on — the way back
+        into the settings on a frame without a touchscreen).
         """
+        hint_only = mode != 'setup'       # time-limited, skippable, post-setup
+        remote = mode == 'remote'
         if self._native_ui is None:
             logger.warning("Setup screen unavailable (no native UI deps)")
             return
@@ -1134,19 +1144,22 @@ class NativeSlideshow:
         ui = self._ui
         canvas = ui.canvas
         logger.info("Setup screen: %s",
-                    "Wi-Fi hint" if hint_only else "first-run setup")
+                    {'hint': "Wi-Fi hint", 'remote': "phone-remote QR"}.get(
+                        mode, "first-run setup"))
         self._showing_photo = False
         self._setup_taps.clear()
         self._setup_active = True
         drawn_key = None
         hits = {}
         next_poll = 0.0
-        deadline = time.time() + self.WIFI_HINT_SECONDS if hint_only else None
+        deadline = (time.time() + (self.REMOTE_QR_SECONDS if remote
+                                   else self.WIFI_HINT_SECONDS)
+                    if hint_only else None)
         try:
             while not self._stop.is_set():
                 now = time.time()
                 if deadline is not None and now > deadline:
-                    logger.info("Setup screen: Wi-Fi hint timed out, playing")
+                    logger.info("Setup screen: timed out, playing")
                     break
                 if now >= next_poll:
                     next_poll = now + self.SETUP_POLL_SECONDS
@@ -1165,8 +1178,16 @@ class NativeSlideshow:
                                 'url': 'http://10.42.0.1:8080'}
                         qr_text = setup_screen.wifi_qr_payload(
                             info['ssid'], info['password'])
-                    elif hint_only:
+                    elif hint_only and not remote:
                         break                          # Wi-Fi is fine: nothing to say
+                    elif remote:
+                        stage = 'remote'
+                        acc = ui.api_get('/api/access') or {}
+                        urls = acc.get('urls') or []
+                        info = {'ssid': st.get('ssid') or 'WLAN'}
+                        if not urls:
+                            break                      # no address: nothing to scan
+                        qr_text = urls[0]
                     else:
                         stage = 'phone'
                         acc = ui.api_get('/api/access') or {}
@@ -1186,7 +1207,8 @@ class NativeSlideshow:
                         img, hits = setup_screen.render(
                             (canvas.w, canvas.h), stage, mods, info,
                             theme='dark', lang=self._lang(),
-                            touch=touch, skippable=hint_only)
+                            touch=touch,
+                            skippable=hint_only and touch)   # a button needs touch
                         canvas.img = img
                         canvas.flush()
                         # Without the code the screen is incomplete: retry next
@@ -1212,10 +1234,30 @@ class NativeSlideshow:
             self._setup_active = False
             self._setup_taps.clear()
 
+    def _boot_qr_wanted(self):
+        """`frame.remote_qr_on_boot`: 'auto' (default) = only when no
+        touchscreen is attached, 'always', or 'never'."""
+        want = str((self._cfg().get('frame', {}) or {}).get(
+            'remote_qr_on_boot', 'auto')).lower()
+        if want in ('never', 'false', 'off', 'no'):
+            return False
+        if want in ('always', 'true', 'on', 'yes'):
+            return True
+        try:
+            return not self._native_ui.touch_present()
+        except Exception:
+            return False
+
     def _watch_wifi_hint(self):
-        """Post-setup, cold boot only: if the server fell back to its setup
-        hotspot (the frame did not find its Wi-Fi), interrupt playback once with
-        the "how to reconnect" screen.
+        """Post-setup, cold boot only: interrupt playback once with a screen
+        that says how to reach the frame from a phone.
+
+          * the server fell back to its setup hotspot (the frame did not find
+            its Wi-Fi) -> the "how to reconnect" screen;
+          * otherwise, on a frame without a touchscreen -> the QR that opens
+            the phone remote, for REMOTE_QR_SECONDS. Unplug, plug in, scan:
+            that is how a new phone gets to the settings (the remote needs the
+            access token, and without touch there is no menu to show it).
 
         Runs in a background thread so a slow-starting server never delays the
         first photo; it raises the hint through the menu-request path, which
@@ -1238,7 +1280,11 @@ class NativeSlideshow:
                     continue
                 if mode == 'hotspot':
                     logger.info("Wi-Fi hint: frame is on its setup hotspot")
-                    self._hint_pending = True
+                    self._hint_pending = 'hint'
+                    self._menu_req.set()
+                elif self._boot_qr_wanted():
+                    logger.info("Power-on: showing the phone-remote QR")
+                    self._hint_pending = 'remote'
                     self._menu_req.set()
                 return
 
