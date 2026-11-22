@@ -25,25 +25,37 @@ RTC alarm powers the Pi up
 
 ## Setup
 
-1. Flash the normal mimir image (see the README).
-2. **Before the first boot**, put a file `mimir.yaml` on the boot partition
-   (the small FAT partition that shows up on any PC):
+The setup wizard asks **"Which display does your frame have?"** — that is all
+it takes:
 
-   ```yaml
-   variant: eink
-   eink:
-     driver: waveshare:epd7in3f     # your panel — see the table below
-     pisugar_model: PiSugar 3       # omit if you have no PiSugar
-     update_time: "06:00"           # when the daily picture changes
-   ```
+1. Flash the normal mimir image (see the README) and boot.
+2. An e-ink frame has nothing to show yet (it does not know its panel), so
+   join the frame's own Wi-Fi by hand: **`mimir-Setup`**, password
+   **`photoframe`**. The setup page opens; pick your home Wi-Fi.
+3. Reconnect the phone to your home Wi-Fi and tap **"Einrichtung fortsetzen"**
+   on the setup page (keep that page open — the link carries the frame's access
+   key). After the language the wizard asks for the display: choose **E-ink**,
+   your panel and the battery board (if any).
+4. The frame installs the panel driver, turns SPI on and restarts (3–5 min).
+   The phone page continues by itself; the panel now shows the setup screen.
 
-3. Boot. The first start installs the panel driver and turns SPI on, then
-   reboots. The panel shows a QR code — set the frame up from your phone exactly
-   like an LCD frame (Wi-Fi first, then the wizard).
+What changes with e-ink: one still picture at a time (no videos — they are not
+even synced), no clock (a date line instead), no night sleep step.
 
-Already running as an LCD frame, or changed the panel? Edit `config_frame.yaml`
-and run `sudo scripts/setup_eink.sh`, then
-`sudo systemctl disable --now photo_frame_slideshow; sudo systemctl enable --now photo_frame_eink`.
+**Without the question** (pre-seeding, or an older install): put a file
+`mimir.yaml` on the boot partition before the first boot —
+
+```yaml
+variant: eink
+eink:
+  driver: waveshare:epd7in3f     # your panel — see the table below
+  pisugar_model: PiSugar 3       # omit if you have no PiSugar
+  update_time: "06:00"           # when the daily picture changes
+```
+
+— or, on a running frame, set those keys in `config_frame.yaml` and run
+`sudo scripts/switch_variant.sh eink` (back: `… lcd`). It does everything the
+wizard does and reboots.
 
 ### Panels
 

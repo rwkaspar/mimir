@@ -134,8 +134,10 @@ only if you want to build from source.
    No touchscreen or keyboard is needed. On a touch frame you can instead tap
    **“Hier am Rahmen weitermachen”** and use the on-device menu.
 
-For an **e-ink frame**, drop a `mimir.yaml` onto the boot partition before the
-first boot — see [docs/EINK.md](docs/EINK.md).
+The wizard asks which display the frame has — **screen (HDMI)** or **e-ink**.
+Choosing e-ink installs the panel driver and restarts the frame; from then on
+it shows one still picture at a time (no videos, no clock, no night sleep).
+See [docs/EINK.md](docs/EINK.md).
 
 - **Target:** 64-bit (arm64), **Raspberry Pi Zero 2 W or newer**.
 - **Login:** user `frame`, password `photoframe` — change it after first login

@@ -322,6 +322,41 @@
         </div>
     </div>
 
+    <!-- Display question (between language and orientation; not a numbered
+         step: it is asked once and skipped when already answered) -->
+    <div class="step" id="step-display">
+        <div id="display-ask" style="flex:1; display:flex; flex-direction:column;">
+            <div class="step-title" data-i18n="display_title">Which display?</div>
+            <div class="step-subtitle" data-i18n="display_subtitle">This decides what the frame can do.</div>
+            <div class="card" id="display-card-lcd" onclick="pickDisplay('lcd')">
+                <div class="card-title" data-i18n="display_lcd">Screen (HDMI)</div>
+                <div style="color:#999; font-size:14px;" data-i18n="display_lcd_desc"></div>
+            </div>
+            <div class="card" id="display-card-eink" onclick="pickDisplay('eink')">
+                <div class="card-title" data-i18n="display_eink">E-ink (e-paper)</div>
+                <div style="color:#999; font-size:14px;" data-i18n="display_eink_desc"></div>
+            </div>
+            <div id="display-eink-opts" style="display:none; margin-top:4px;">
+                <label style="display:block; color:#999; font-size:13px; margin:8px 0 4px;" data-i18n="display_panel">Panel</label>
+                <select id="display-panel" style="width:100%; padding:12px; font-size:15px; background:#1a1a1a; color:#fff; border:1px solid #333; border-radius:8px;"></select>
+                <label style="display:block; color:#999; font-size:13px; margin:12px 0 4px;" data-i18n="display_battery">Battery board</label>
+                <select id="display-pisugar" style="width:100%; padding:12px; font-size:15px; background:#1a1a1a; color:#fff; border:1px solid #333; border-radius:8px;"></select>
+            </div>
+            <div id="display-hint" style="color:#888; font-size:13px; margin-top:12px;"></div>
+            <div id="display-msg"></div>
+            <div class="spacer"></div>
+            <div style="margin-top:16px;">
+                <button class="btn btn-primary" id="display-next" onclick="saveDisplay()" data-i18n="next">Next</button>
+                <button class="btn btn-back" onclick="showStep(1)" data-i18n="back">Back</button>
+            </div>
+        </div>
+        <div id="display-wait" style="display:none; flex:1; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+            <div class="step-title" data-i18n="display_wait_title">The frame is switching over</div>
+            <div class="step-subtitle" data-i18n="display_wait_body"></div>
+            <div id="display-wait-state" style="color:#888; font-size:14px; margin-top:16px;"></div>
+        </div>
+    </div>
+
     <!-- Step 2: Orientation -->
     <div class="step" id="step-2">
         <div style="flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
@@ -512,6 +547,22 @@
             ts_scan_qr: 'Scan this QR code to authenticate:',
             ts_connected: 'Tailscale connected',
             ts_ip: 'Tailscale IP',
+            display_title: 'Which display does your frame have?',
+            display_subtitle: 'This decides what the frame can do.',
+            display_lcd: 'Screen (HDMI)',
+            display_lcd_desc: 'Photos and videos in turn, clock, night sleep. Needs power all the time.',
+            display_eink: 'E-ink (e-paper)',
+            display_eink_desc: 'One photo a day, like a print. No videos, no clock. Runs for weeks on a battery.',
+            display_panel: 'Which panel?',
+            display_battery: 'Battery board',
+            display_no_battery: 'None (power supply)',
+            display_hdmi_yes: 'A screen is connected to HDMI.',
+            display_hdmi_no: 'No screen is connected to HDMI.',
+            display_cannot: 'This installation cannot switch by itself. Put a file mimir.yaml with the line "variant: eink" on the SD card\u2019s boot partition and run the setup again (see docs/EINK.md).',
+            display_wait_title: 'The frame is switching over',
+            display_wait_body: 'It installs what the display needs and restarts. This takes about 3 to 5 minutes. This page continues by itself \u2013 keep it open.',
+            display_wait_down: 'Restarting \u2026',
+            display_wait_up: 'Working \u2026',
             orient_title: 'Orientation',
             orient_subtitle: 'How is your frame mounted?',
             settings_title: 'Frame Settings',
@@ -613,6 +664,22 @@
             ts_scan_qr: 'QR-Code scannen zum Authentifizieren:',
             ts_connected: 'Tailscale verbunden',
             ts_ip: 'Tailscale-IP',
+            display_title: 'Welches Display hat dein Rahmen?',
+            display_subtitle: 'Das bestimmt, was der Rahmen kann.',
+            display_lcd: 'Bildschirm (HDMI)',
+            display_lcd_desc: 'Fotos und Videos im Wechsel, Uhr, Nachtruhe. Braucht dauerhaft Strom.',
+            display_eink: 'E-Ink (E-Paper)',
+            display_eink_desc: 'Ein Foto pro Tag, wie gedruckt. Keine Videos, keine Uhr. L\u00e4uft mit Akku wochenlang.',
+            display_panel: 'Welches Panel?',
+            display_battery: 'Akku-Platine',
+            display_no_battery: 'Keine (Netzteil)',
+            display_hdmi_yes: 'An HDMI ist ein Bildschirm angeschlossen.',
+            display_hdmi_no: 'An HDMI ist kein Bildschirm angeschlossen.',
+            display_cannot: 'Diese Installation kann nicht von selbst umschalten. Lege auf die Boot-Partition der SD-Karte eine Datei mimir.yaml mit der Zeile \u201evariant: eink\u201c und starte die Einrichtung neu (siehe docs/EINK.md).',
+            display_wait_title: 'Der Rahmen stellt sich um',
+            display_wait_body: 'Er installiert, was das Display braucht, und startet neu. Das dauert etwa 3 bis 5 Minuten. Diese Seite geht von selbst weiter \u2013 lass sie offen.',
+            display_wait_down: 'Startet neu \u2026',
+            display_wait_up: 'Arbeitet \u2026',
             orient_title: 'Ausrichtung',
             orient_subtitle: 'Wie ist dein Rahmen montiert?',
             settings_title: 'Rahmen-Einstellungen',
@@ -716,6 +783,7 @@
             var el = document.getElementById('step-' + i);
             if (el) el.classList.toggle('active', i === n);
         }
+        document.getElementById('step-display').classList.remove('active');
         updateProgress();
         // Step-specific init
         if (n === 3) frameSettingsInit();
@@ -727,9 +795,12 @@
     // Steps that do not apply to this frame are skipped in both directions:
     // an e-ink frame has no backlight, so the "sleep mode" step (4) is moot.
     var skippedSteps = {};
-    fetch('/api/frame/settings').then(function(r) { return r.json(); }).then(function(d) {
-        if (d && d.variant === 'eink') skippedSteps[4] = true;
-    }).catch(function() {});
+    function loadVariant() {
+        return fetch('/api/frame/settings').then(function(r) { return r.json(); }).then(function(d) {
+            skippedSteps[4] = !!(d && d.variant === 'eink');
+        }).catch(function() {});
+    }
+    loadVariant();
 
     function nextStep() {
         var n = currentStep + 1;
@@ -757,7 +828,92 @@
         lang = l;
         localStorage.setItem('frame-language', l);
         applyI18n();
-        nextStep();
+        displayStepMaybe();
+    }
+
+    // --- Display question: LCD or e-ink ---
+    // Asked once, right after the language: it decides which later steps
+    // apply (no sleep step, no videos, no clock on e-ink). Changing the answer
+    // makes the frame install the panel's software and reboot.
+    var displayInfo = null, displayPick = 'lcd';
+
+    function displayStepMaybe() {
+        fetch('/api/display').then(function(r) { return r.json(); }).then(function(d) {
+            if (!d || !d.variant || d.confirmed) { nextStep(); return; }
+            displayInfo = d;
+            var opt = function(v, label, sel) {
+                return '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(label) + '</option>';
+            };
+            document.getElementById('display-panel').innerHTML = d.panels.map(function(p, i) {
+                return opt(p.driver, p.label, d.driver ? p.driver === d.driver : i === 0);
+            }).join('');
+            document.getElementById('display-pisugar').innerHTML = d.pisugar_models.map(function(m) {
+                return opt(m, m || t('display_no_battery'), m === d.pisugar_model);
+            }).join('');
+            document.getElementById('display-hint').textContent =
+                d.hdmi_connected === true ? t('display_hdmi_yes') :
+                d.hdmi_connected === false ? t('display_hdmi_no') : '';
+            document.getElementById('display-msg').innerHTML = '';
+            document.getElementById('display-ask').style.display = 'flex';
+            document.getElementById('display-wait').style.display = 'none';
+            pickDisplay(d.suggested || d.variant);
+            for (var i = 1; i <= totalSteps; i++) {
+                var el = document.getElementById('step-' + i);
+                if (el) el.classList.remove('active');
+            }
+            document.getElementById('step-display').classList.add('active');
+        }).catch(function() { nextStep(); });   // older server: no question
+    }
+
+    function pickDisplay(v) {
+        displayPick = v === 'eink' ? 'eink' : 'lcd';
+        document.getElementById('display-card-lcd').classList.toggle('selected', displayPick === 'lcd');
+        document.getElementById('display-card-eink').classList.toggle('selected', displayPick === 'eink');
+        document.getElementById('display-eink-opts').style.display = displayPick === 'eink' ? 'block' : 'none';
+    }
+
+    function saveDisplay() {
+        var btn = document.getElementById('display-next');
+        var body = { variant: displayPick };
+        if (displayPick === 'eink') {
+            body.driver = document.getElementById('display-panel').value;
+            body.pisugar_model = document.getElementById('display-pisugar').value;
+        }
+        btn.disabled = true;
+        fetch('/api/display', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        }).then(function(r) { return r.json(); }).then(function(res) {
+            btn.disabled = false;
+            if (!res.ok) {
+                document.getElementById('display-msg').innerHTML = '<div class="status-msg error">' +
+                    esc(res.error === 'cannot_switch' ? t('display_cannot') : (res.error || 'Error')) + '</div>';
+                return;
+            }
+            if (!res.restart) { loadVariant().then(function() { showStep(2); }); return; }
+            displayWait();
+        }).catch(function() { btn.disabled = false; });
+    }
+
+    // The frame is rebooting into the other variant: wait until the server
+    // has been away and is back, then carry on with the next step.
+    function displayWait() {
+        document.getElementById('display-ask').style.display = 'none';
+        document.getElementById('display-wait').style.display = 'flex';
+        var state = document.getElementById('display-wait-state');
+        var wasDown = false;
+        state.textContent = t('display_wait_up');
+        var timer = setInterval(function() {
+            fetch('/api/display').then(function(r) { return r.json(); }).then(function(d) {
+                if (wasDown && d && d.variant === displayPick) {
+                    clearInterval(timer);
+                    loadVariant().then(function() { showStep(2); });
+                }
+            }).catch(function() {
+                wasDown = true;
+                state.textContent = t('display_wait_down');
+            });
+        }, 5000);
     }
 
     // --- Step 3: WiFi ---

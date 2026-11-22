@@ -535,6 +535,7 @@ ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl start photo_frame_eink
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart photo_frame_eink
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /sbin/poweroff
 ${FRAME_USER} ALL=(ALL) NOPASSWD: ${REPO_DIR}/scripts/install_bootsplash.sh
+${FRAME_USER} ALL=(ALL) NOPASSWD: ${REPO_DIR}/scripts/switch_variant.sh
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/dd
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/setterm
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /sbin/shutdown

@@ -184,6 +184,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.serve_connect_config()
         elif path == '/api/eink':
             self.serve_eink()
+        elif path == '/api/display':
+            self.serve_display_choice()
         elif path == '/api/eink/preview.png':
             self.serve_eink_preview()
         elif path.startswith('/photos/'):
@@ -252,6 +254,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.handle_wizard_complete()
         elif self.path == '/api/eink':
             self.handle_save_eink()
+        elif self.path == '/api/display':
+            self.handle_display_choice()
         elif self.path == '/api/eink/refresh':
             self.handle_eink_refresh()
         else:
@@ -1588,6 +1592,27 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Error saving e-ink settings: {e}")
             self._json_response({'ok': False, 'error': str(e)}, 400)
+
+    def serve_display_choice(self):
+        """The wizard's "which display?" question: current variant, a
+        suggestion (is a monitor on HDMI?), the panels on offer."""
+        from frame import display_choice
+        self._json_response(display_choice.options(self.app.config))
+
+    def handle_display_choice(self):
+        """Store the answer; a changed variant/panel reboots the frame."""
+        from frame import display_choice
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        try:
+            data = json.loads(body) if body else {}
+            res = display_choice.apply(self.app.config, self.app.config_path, data)
+            self._json_response(res, 200 if res.get('ok') else 409)
+        except ValueError as e:
+            self._json_response({'ok': False, 'error': str(e)}, 400)
+        except Exception as e:
+            logger.error(f"Error saving display choice: {e}")
+            self._json_response({'ok': False, 'error': str(e)}, 500)
 
     def handle_eink_refresh(self):
         """Draw a new picture now: restart the cycle (it draws on start)."""
