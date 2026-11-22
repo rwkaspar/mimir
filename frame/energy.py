@@ -159,26 +159,48 @@ class EnergySaveManager:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
+    def _apply_schedule(self, data):
+        self.enabled = bool(data.get('enabled', False))
+        self.off_time = data.get('off_time', '22:00')
+        self.on_time = data.get('on_time', '07:00')
+        self.weekdays = data.get('weekdays', [0, 1, 2, 3, 4, 5, 6])
+
+    def _schedule_dict(self):
+        return {'enabled': self.enabled, 'off_time': self.off_time,
+                'on_time': self.on_time, 'weekdays': list(self.weekdays)}
+
     def _load(self):
+        """The schedule lives in the config (`energy_save.schedule`). It used
+        to live only in /tmp, i.e. it was gone after every reboot and the frame
+        stayed awake at night until someone set it again — that file is still
+        read once, as a migration."""
+        config = self.app.config if self.app else {}
+        saved = (config.get('energy_save', {}) or {}).get('schedule')
+        if isinstance(saved, dict):
+            self._apply_schedule(saved)
+            return
         try:
             with open(self.SCHEDULE_FILE) as f:
-                data = json.load(f)
-                self.enabled = data.get('enabled', False)
-                self.off_time = data.get('off_time', '22:00')
-                self.on_time = data.get('on_time', '07:00')
-                self.weekdays = data.get('weekdays', [0, 1, 2, 3, 4, 5, 6])
+                self._apply_schedule(json.load(f))
         except Exception:
-            pass
+            return
+        self._save()
 
     def _save(self):
+        data = self._schedule_dict()
+        path = getattr(self.app, 'config_path', None) if self.app else None
+        if not path:
+            return
         try:
-            with open(self.SCHEDULE_FILE, 'w') as f:
-                json.dump({
-                    'enabled': self.enabled,
-                    'off_time': self.off_time,
-                    'on_time': self.on_time,
-                    'weekdays': self.weekdays,
-                }, f)
+            import yaml
+            with open(path) as f:
+                cfg = yaml.safe_load(f) or {}
+            cfg.setdefault('energy_save', {})['schedule'] = data
+            tmp = str(path) + '.tmp'
+            with open(tmp, 'w') as f:
+                yaml.dump(cfg, f, default_flow_style=False)
+            os.replace(tmp, path)
+            self.app.config.setdefault('energy_save', {})['schedule'] = data
         except Exception as e:
             logger.error(f"Error saving schedule: {e}")
 
