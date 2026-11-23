@@ -150,6 +150,12 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.serve_sync_status()
         elif path == '/remote':
             self.serve_remote()
+        elif path == '/library':
+            self._serve_html_file('library.html', cache=False)
+        elif path == '/api/library':
+            self.serve_library()
+        elif path.startswith('/api/library/thumb/'):
+            self.serve_library_thumb(path[len('/api/library/thumb/'):])
         elif path == '/api/synology':
             self.serve_synology_config()
         elif path == '/api/google_photos':
@@ -256,6 +262,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self.handle_save_eink()
         elif self.path == '/api/display':
             self.handle_display_choice()
+        elif self.path == '/api/library':
+            self.handle_library()
         elif self.path == '/api/eink/refresh':
             self.handle_eink_refresh()
         else:
@@ -335,7 +343,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
                 # NativeVideoPlayer (the WPE/cog browser can't decode them on
                 # this board), so they are deliberately kept out of the kiosk's
                 # slideshow list.
-                files = list(subdir.glob('*.jpg'))
+                from frame import library
+                files = library.visible(subdir.glob('*.jpg'), self.photos_dir)
                 return [f'/photos/{orient}/{p.name}' for p in files]
 
             photos = _list_media_urls(photos_subdir, orientation)
@@ -362,6 +371,64 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Error serving photos JSON: {e}")
             self.send_error(500, str(e))
+
+    # --- Library: which pictures are in the slideshow ---
+
+    def _library_payload(self):
+        from frame import library
+        orientation = self._get_orientation()
+        items = library.listing(self.photos_dir, orientation)
+        return {'orientation': orientation, 'items': items,
+                'shown': sum(1 for i in items if not i['hidden']),
+                'total': len(items)}
+
+    def serve_library(self):
+        """All pictures of the current orientation, newest first, each with
+        whether it is in the slideshow."""
+        from frame import library
+        library.sweep_thumbs(self.photos_dir)
+        self._json_response(self._library_payload())
+
+    def serve_library_thumb(self, rest):
+        """A small JPEG of one picture: /api/library/thumb/<orientation>/<name>."""
+        from urllib.parse import unquote
+        from frame import library
+        orientation, _, name = unquote(rest).partition('/')
+        path = library.thumb(self.photos_dir, orientation, name)
+        if not path:
+            self.send_error(404, "Not found")
+            return
+        with open(path, 'rb') as f:
+            content = f.read()
+        self.send_response(200)
+        self.send_header('Content-type', 'image/jpeg')
+        self.send_header('Content-Length', len(content))
+        self.send_header('Cache-Control', 'private, max-age=86400')
+        self.end_headers()
+        self.wfile.write(content)
+
+    def handle_library(self):
+        """Take pictures out of the slideshow or put them back:
+        {"names": [...], "hidden": true|false}."""
+        from frame import library
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            data = json.loads(self.rfile.read(length) or b'{}')
+            names = data.get('names')
+            if not isinstance(names, list) or not isinstance(data.get('hidden'), bool):
+                raise ValueError('names (list) and hidden (bool) required')
+            library.set_hidden(self.photos_dir, names, data['hidden'])
+        except ValueError as e:
+            self._json_response({'ok': False, 'error': str(e)}, 400)
+            return
+        except Exception as e:
+            logger.error("Library save failed: %s", e)
+            self._json_response({'ok': False, 'error': str(e)}, 500)
+            return
+        out = self._library_payload()
+        del out['items']
+        out['ok'] = True
+        self._json_response(out)
 
     def serve_photo(self, photo_name):
         """Serve a photo or video file (with Range support for videos)."""

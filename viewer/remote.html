@@ -261,6 +261,11 @@
         </div>
     </div>
 
+    <div class="btn-row">
+        <button class="btn btn-plain" onclick="openLibrary()" data-t="library_btn">Bilder auswählen</button>
+    </div>
+    <div class="set-hint" data-t="library_hint">Alle Bilder des Rahmens ansehen und einzelne aus der Diashow nehmen.</div>
+
     <h2 class="section-header lcd-only" data-t="sleep_header">Schlaf</h2>
     <div class="album-card lcd-only">
         <div class="set-row">
@@ -396,6 +401,7 @@
                 wifi_started: 'Now join the Wi-Fi "mimir-Setup" (password: photoframe) with your phone.',
                 confirm_orientation: 'Change the orientation? The frame reloads all photos for the new format.',
                 title: 'mimir', subtitle: 'Settings and photo sources',
+                library_btn: 'Choose pictures', library_hint: 'See all pictures on the frame and take single ones out of the slideshow.',
                 synology: 'Synology Photos', google: 'Google Photos', immich: 'Immich',
                 icloud: 'iCloud', nextcloud: 'Nextcloud',
                 add_syn: '+ Add Synology Album', add_gph: '+ Add Google Album', add_imm: '+ Add Immich Album',
@@ -436,6 +442,7 @@
                 wifi_started: 'Verbinde dich jetzt mit dem WLAN \u201emimir-Setup\u201c (Passwort: photoframe).',
                 confirm_orientation: 'Ausrichtung \u00e4ndern? Der Rahmen l\u00e4dt alle Fotos f\u00fcr das neue Format neu.',
                 title: 'mimir', subtitle: 'Einstellungen und Fotoquellen',
+                library_btn: 'Bilder ausw\u00e4hlen', library_hint: 'Alle Bilder des Rahmens ansehen und einzelne aus der Diashow nehmen.',
                 synology: 'Synology Photos', google: 'Google Photos', immich: 'Immich',
                 icloud: 'iCloud', nextcloud: 'Nextcloud',
                 add_syn: '+ Synology Album', add_gph: '+ Google Album', add_imm: '+ Immich Album',
@@ -460,6 +467,12 @@
         var lang = localStorage.getItem('frame-language') ||
             (/^de/i.test(navigator.language || 'de') ? 'de' : 'en');
         function t(k) { return (i18n[lang] || i18n.en)[k] || k; }
+
+        function openLibrary() {
+            var tok = null;
+            try { tok = localStorage.getItem('pf_token'); } catch (e) {}
+            location.href = '/library' + (tok ? '?token=' + encodeURIComponent(tok) : '');
+        }
 
         function applyLang() {
             document.querySelectorAll('[data-t]').forEach(function (el) {

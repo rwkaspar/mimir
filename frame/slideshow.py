@@ -66,6 +66,7 @@ class NativeSlideshow:
         self._fb_lock = threading.Lock()
         self._fbfd = None          # cached /dev/fb0 fd for direct writes
         self._cur_fb_raw = None
+        self._all_hidden = False
         self._showing_photo = False
         self._hold_bg = None
         # Over video the ring can't be drawn under kmssink; a hold instead sets
@@ -201,7 +202,17 @@ class NativeSlideshow:
             items = videos
         else:
             items = photos + videos
-        return self._daily_order(items)
+        # Pictures the owner took out on the phone page (/library). If that
+        # leaves nothing, everything plays (never a blank panel).
+        from frame import library
+        shown = library.visible(items, self.photos_dir)
+        self._all_hidden = bool(items) and all(
+            library.is_hidden(self.photos_dir, p) for p in items)
+        return self._daily_order(shown)
+
+    def _is_hidden(self, path):
+        from frame import library
+        return library.is_hidden(self.photos_dir, path)
 
     def _daily_order(self, items):
         """Return items in a shuffle that is fixed for the calendar day.
@@ -1361,6 +1372,10 @@ class NativeSlideshow:
                 if self._menu_req.is_set():
                     self._open_menu()
                     break  # rebuild playlist after the menu
+                # Unticked on the phone since this round started: skip it now,
+                # not only from the next round on.
+                if not self._all_hidden and self._is_hidden(item):
+                    continue
                 if self._is_video(item):
                     # fb0 shows through for a moment when the clip ends: have
                     # the photo that follows waiting there (with the current
@@ -1422,7 +1437,8 @@ class NativeSlideshow:
 
     def _next_photo(self, items, i):
         for j in range(i + 1, len(items)):
-            if not self._is_video(items[j]):
+            if not self._is_video(items[j]) and (
+                    self._all_hidden or not self._is_hidden(items[j])):
                 return items[j]
         return None
 

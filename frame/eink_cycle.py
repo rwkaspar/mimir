@@ -274,8 +274,10 @@ class EinkCycle:
         base, orient = self.photos_dir()
         d = os.path.join(base, orient)
         try:
-            return [os.path.join(d, f) for f in os.listdir(d)
-                    if f.lower().endswith(PHOTO_EXTS)]
+            from frame import library
+            files = [os.path.join(d, f) for f in os.listdir(d)
+                     if f.lower().endswith(PHOTO_EXTS)]
+            return library.visible(files, base)    # minus those unticked on the phone
         except OSError:
             return []
 

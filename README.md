@@ -276,6 +276,10 @@ plug in, scan. That is how a new phone gets to the settings later.
 
 - **Frame** — orientation, photo interval, brightness, clock (LCD); time and
   number of pictures per day, date overlay, “new picture now” (e-ink).
+- **Choose pictures** (`/library`) — every picture on the frame as a grid,
+  newest first. Tap one to take it out of the slideshow or put it back; the
+  frame skips it from the next picture change on. The file stays on the frame
+  and in your album. (If nothing is ticked, the frame shows everything.)
 - **Sleep** — night schedule and “screen off for …” (LCD).
 - **System** — change Wi-Fi, restart, switch off.
 
