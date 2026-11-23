@@ -130,3 +130,36 @@ def test_power_on_qr_only_without_touch(tmp_path, monkeypatch):
     never = show(tmp_path, 'setup_complete: true\nframe: {remote_qr_on_boot: never}\n')
     never._native_ui = UI
     assert never._boot_qr_wanted() is False
+
+
+def test_fb0_under_a_video_holds_the_next_photo_with_the_current_time(tmp_path, monkeypatch):
+    """When a clip ends, fb0 shows through for a moment. It must then hold the
+    photo that follows with the current time — not the photo from before the
+    clip with the time of back then."""
+    import time as _time
+    s = show(tmp_path, 'clock: {enabled: true}\n')
+    calls = []
+    monkeypatch.setattr(s, '_write_fb', lambda raw: calls.append(('photo', raw)))
+    monkeypatch.setattr(s, '_overlay_clock', lambda raw, cfg=None: calls.append(('clock', raw)))
+    now = [_time.mktime((2026, 11, 23, 10, 15, 30, 0, 0, -1))]
+    monkeypatch.setattr('frame.slideshow.time.localtime',
+                        lambda *a: _time.gmtime(now[0]) if not a else _time.gmtime(*a))
+    state = {}
+    s._refresh_under_video('/tmp/next.raw', state)
+    assert calls == [('photo', '/tmp/next.raw'), ('clock', '/tmp/next.raw')]
+    s._refresh_under_video('/tmp/next.raw', state)        # same minute: nothing
+    assert len(calls) == 2
+    now[0] += 60                                          # minute rolls over
+    s._refresh_under_video('/tmp/next.raw', state)
+    assert calls[2:] == [('clock', '/tmp/next.raw')]
+    calls.clear()
+    s._refresh_under_video(None, {})                      # nothing to put there
+    assert calls == []
+
+    off = show(tmp_path, 'clock: {enabled: false}\n')
+    monkeypatch.setattr(off, '_write_fb', lambda raw: calls.append(('photo', raw)))
+    st = {}
+    off._refresh_under_video('/tmp/next.raw', st)
+    now[0] += 60
+    off._refresh_under_video('/tmp/next.raw', st)
+    assert calls == [('photo', '/tmp/next.raw')]          # once, no clock

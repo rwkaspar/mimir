@@ -459,10 +459,33 @@ class NativeSlideshow:
                     pass
                 self.fd = None
 
-    def _play_video_gi(self, path, overlay=True):
+    def _refresh_under_video(self, raw, state):
+        """Keep fb0 ready for the moment the video ends. While kmssink plays,
+        fb0 is hidden — but it shows again for a moment as soon as the clip
+        stops, before the next photo is drawn. Left alone it would still hold
+        the photo from before the video, with the time of back then. So put
+        `raw` (the photo that comes next) there with the current time, and
+        again whenever the minute rolls over. Only call once the video is on
+        screen, or the photo would flash up before it."""
+        m = time.localtime().tm_min
+        if not raw or state.get('min') == m:
+            return
+        first = 'min' not in state
+        state['min'] = m
+        try:
+            clk = self._clock_cfg()
+            if first:
+                self._write_fb(raw)
+            if clk['enabled']:
+                self._overlay_clock(raw, clk)
+        except Exception as e:
+            logger.debug('fb0 refresh under video failed: %s', e)
+
+    def _play_video_gi(self, path, overlay=True, under=None):
         """Play one clip in-process (GStreamer via python-gi) so the clock
         plane can share its DRM fd. Returns False if the pipeline errored (the
-        caller may retry without the clock)."""
+        caller may retry without the clock). `under`: the photo to leave on
+        fb0 for when the clip ends (see _refresh_under_video)."""
         import gi
         gi.require_version('Gst', '1.0')
         from gi.repository import Gst, GLib
@@ -485,6 +508,7 @@ class NativeSlideshow:
 
         bus.connect('message', on_msg)
         deadline = time.time() + self._duration(path) + 15
+        under_state = {}
         def tick():
             if self._menu_req.is_set():
                 self._prep_menu()     # draw menu to fb0 BEFORE kmssink releases
@@ -495,6 +519,8 @@ class NativeSlideshow:
                 gloop.quit()
                 return False
             clock.tick(pipe)
+            if under and pipe.get_state(0)[1] == Gst.State.PLAYING:
+                self._refresh_under_video(under, under_state)
             return True
 
         GLib.timeout_add(150, tick)
@@ -507,21 +533,21 @@ class NativeSlideshow:
             clock.close()
         return result['ok']
 
-    def _play_video(self, path):
+    def _play_video(self, path, under=None):
         self._showing_photo = False     # over video the fb0 ring is invisible
         logger.info("Slideshow video: %s", path)
         # Preferred: in-process pipeline (clock overlay stays current). If the
         # overlay element is what breaks it, remember that and play without.
         try:
             import gi  # noqa: F401
-            if self._play_video_gi(path):
+            if self._play_video_gi(path, under=under):
                 return
             if (self._clock_cfg()['enabled'] and not self._overlay_broken
                     and not (self._stop.is_set() or self._menu_req.is_set())):
                 logger.warning("Video failed with the clock plane; "
                                "retrying without it")
                 self._overlay_broken = True
-                if self._play_video_gi(path, overlay=False):
+                if self._play_video_gi(path, overlay=False, under=under):
                     return
             else:
                 return
@@ -534,7 +560,10 @@ class NativeSlideshow:
         proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.DEVNULL)
         deadline = time.time() + self._duration(path) + 15
+        started, under_state = time.time(), {}
         while proc.poll() is None:
+            if time.time() - started > 3:      # video is on screen by now
+                self._refresh_under_video(under, under_state)
             if self._menu_req.is_set():
                 self._prep_menu()     # draw menu to fb0 BEFORE kmssink releases
                 self._sigint(proc)
@@ -1325,6 +1354,7 @@ class NativeSlideshow:
                 continue
             # Pre-render the first photo so the loop can double-buffer.
             pending = None  # (raw_path, src) already rendered, ready to show
+            shown = None    # raw of the photo last put on screen
             for i, item in enumerate(items):
                 if self._stop.is_set():
                     break
@@ -1332,8 +1362,16 @@ class NativeSlideshow:
                     self._open_menu()
                     break  # rebuild playlist after the menu
                 if self._is_video(item):
-                    pending = None
-                    self._play_video(item)
+                    # fb0 shows through for a moment when the clip ends: have
+                    # the photo that follows waiting there (with the current
+                    # time), not the one from before the clip. `pending` is
+                    # that photo already; render it now if nothing was shown
+                    # before this clip.
+                    if not pending:
+                        nxt_item = self._next_photo(items, i)
+                        if nxt_item and self._render_photo(nxt_item, cur):
+                            pending = (cur, nxt_item)
+                    self._play_video(item, under=pending[0] if pending else shown)
                     if self._hold_req.is_set():
                         self._hold_overlay()     # draw the ring on revealed fb0
                     if self._menu_req.is_set():
@@ -1348,6 +1386,7 @@ class NativeSlideshow:
                         continue
                     raw = cur
                 self._write_fb(raw)
+                shown = raw
                 self._showing_photo = True     # enable hot-corner ring over it
                 self._hold_req.clear()         # photo path draws directly, no reveal
                 clk = self._clock_cfg()
