@@ -146,7 +146,13 @@
                 var img = document.createElement('img');
                 img.loading = 'lazy';
                 img.alt = '';
-                img.src = '/api/library/thumb/' + orientation + '/' + encodeURIComponent(it.name);
+                img.src = '/api/library/thumb/' + orientation + '/' + encodeURIComponent(it.name) +
+                    (token ? '?token=' + encodeURIComponent(token) : '');
+                img.onerror = function () {
+                    if (img.dataset.retried) { img.style.visibility = 'hidden'; return; }
+                    img.dataset.retried = '1';          // frame was busy: once more
+                    setTimeout(function () { img.src = img.src + (token ? '&' : '?') + 'r=1'; }, 1500);
+                };
                 b.appendChild(img);
                 var box = document.createElement('span');
                 box.className = 'box';

@@ -18,6 +18,9 @@
             margin-bottom: 4px;
             color: #fff;
         }
+        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+        .brand h1 { margin-bottom: 0; letter-spacing: 2px; font-weight: 500; }
+        .logo { width: 44px; height: 29px; flex: none; }
         .subtitle {
             color: #888;
             font-size: 14px;
@@ -181,7 +184,7 @@
     </style>
 </head>
 <body>
-    <h1 id="r-title">FolderSync</h1>
+    <div class="brand"><svg class="logo" viewBox="149 42 222 145" aria-hidden="true"><g fill="none" stroke="#ededf0" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"><rect x="155" y="48" width="210" height="133" rx="16"/><line x1="260" y1="54" x2="260" y2="175"/><line x1="161" y1="114" x2="359" y2="114"/></g></svg><h1 id="r-title">mimir</h1></div>
     <div class="subtitle" id="r-subtitle">Configure photo sources</div>
     <div id="r-note" style="margin:0 0 16px;padding:10px 12px;border-radius:10px;background:rgba(120,140,170,0.12);border:1px solid rgba(120,140,170,0.25);font-size:13px;line-height:1.4;color:#9aa6b4;">This page runs locally on your frame.</div>
 
@@ -261,10 +264,17 @@
         </div>
     </div>
 
-    <div class="btn-row">
-        <button class="btn btn-plain" onclick="openLibrary()" data-t="library_btn">Bilder auswählen</button>
+    <h2 class="section-header" data-t="pictures_header">Bilder</h2>
+    <div class="album-card">
+        <div class="btn-row" style="margin-top:0;">
+            <button class="btn btn-plain" onclick="openLibrary()" data-t="library_btn">Bilder auswählen</button>
+        </div>
+        <div class="set-hint" data-t="library_hint">Alle Bilder des Rahmens ansehen und einzelne aus der Diashow nehmen.</div>
+        <div class="btn-row">
+            <button class="btn btn-sync" id="sync-btn" onclick="triggerSync()">Sync Now</button>
+        </div>
+        <div class="set-hint" data-t="sync_hint">Holt neue Bilder sofort aus deinen Alben. Sonst geschieht das von selbst.</div>
     </div>
-    <div class="set-hint" data-t="library_hint">Alle Bilder des Rahmens ansehen und einzelne aus der Diashow nehmen.</div>
 
     <h2 class="section-header lcd-only" data-t="sleep_header">Schlaf</h2>
     <div class="album-card lcd-only">
@@ -324,6 +334,10 @@
     <div id="nc-albums"></div>
     <button class="btn-add" id="r-add-nc" onclick="addNcAlbum()">+ Add Nextcloud Album</button>
 
+    <div class="btn-row">
+        <button class="btn btn-save" id="r-save" onclick="saveConfig()">Save</button>
+    </div>
+
     <h2 class="section-header" id="r-ha-header">Home Assistant (MQTT)</h2>
     <div class="album-card">
         <label style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -351,10 +365,6 @@
         <div id="connect-pairing" style="margin-top:6px;font-size:13px;color:#8ad;"></div>
     </div>
 
-    <div class="btn-row">
-        <button class="btn btn-save" id="r-save" onclick="saveConfig()">Save</button>
-        <button class="btn btn-sync" id="sync-btn" onclick="triggerSync()">Sync Now</button>
-    </div>
 
     <div id="sync-progress"></div>
     <div id="status-bar"></div>
@@ -406,7 +416,8 @@
                 icloud: 'iCloud', nextcloud: 'Nextcloud',
                 add_syn: '+ Add Synology Album', add_gph: '+ Add Google Album', add_imm: '+ Add Immich Album',
                 add_icl: '+ Add iCloud Album', add_nc: '+ Add Nextcloud Album',
-                save: 'Save', sync_now: 'Sync Now',
+                save: 'Save albums', sync_now: 'Sync now',
+                pictures_header: 'Pictures', sync_hint: 'Fetches new pictures from your albums right away. Otherwise this happens by itself.',
                 remove: 'Remove', share_url: 'Share URL', passphrase: 'Passphrase',
                 resolving: 'resolving\u2026', new_album: 'new album',
                 saving: 'Saving...', saved: 'Saved', error: 'Error: ',
@@ -447,7 +458,8 @@
                 icloud: 'iCloud', nextcloud: 'Nextcloud',
                 add_syn: '+ Synology Album', add_gph: '+ Google Album', add_imm: '+ Immich Album',
                 add_icl: '+ iCloud Album', add_nc: '+ Nextcloud Album',
-                save: 'Speichern', sync_now: 'Jetzt synchronisieren',
+                save: 'Alben speichern', sync_now: 'Jetzt synchronisieren',
+                pictures_header: 'Bilder', sync_hint: 'Holt neue Bilder sofort aus deinen Alben. Sonst geschieht das von selbst.',
                 remove: 'Entfernen', share_url: 'Freigabe-URL', passphrase: 'Passwort',
                 resolving: 'l\u00f6se auf\u2026', new_album: 'neues Album',
                 saving: 'Speichere...', saved: 'Gespeichert', error: 'Fehler: ',

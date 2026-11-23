@@ -1170,28 +1170,13 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
             self._json_response({'ok': True, 'sync_triggered': not has_photos})
 
             if new_orientation != old_orientation:
-                repo_dir = Path(__file__).resolve().parent.parent
-                splash_script = repo_dir / 'scripts' / 'install_bootsplash.sh'
-                config_path = self.app.config_path
-
                 def apply_orientation():
                     time.sleep(1)
                     subprocess.run(['sudo', 'systemctl', 'restart',
                                     display_service(self.app.config)],
                                  capture_output=True, timeout=15)
                     logger.info(f"Orientation changed to {new_orientation}, restarted display")
-                    # Re-skin the boot splash for the new orientation so it
-                    # matches on the next boot/shutdown. Slow (rebuilds
-                    # initramfs) but orientation changes are rare.
-                    if splash_script.exists():
-                        try:
-                            subprocess.run(
-                                ['sudo', str(splash_script),
-                                 new_orientation, str(config_path)],
-                                capture_output=True, timeout=180)
-                            logger.info(f"Boot splash rebuilt for {new_orientation}")
-                        except Exception as e:
-                            logger.warning(f"Boot splash rebuild failed: {e}")
+                    self._rebuild_boot_splash(new_orientation)
                     # Rebuild the newly-active orientation from the sources and
                     # shrink the old one back to the shipped defaults (one full
                     # library on disk at a time).
@@ -1205,6 +1190,30 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Error saving orientation: {e}")
             self.send_error(400, str(e))
+
+    def _rebuild_boot_splash(self, orientation):
+        """Re-skin the Plymouth boot splash for `orientation`, so the logo at
+        power-on stands upright on the next boot. Slow (rebuilds the initramfs)
+        but orientation changes are rare. Needs the sudoers rule setup_pi.sh
+        installs; without it this logs why and the splash stays as it was."""
+        script = (Path(__file__).resolve().parent.parent / 'scripts'
+                  / 'install_bootsplash.sh')
+        if not script.exists() or variant(self.app.config) == 'eink':
+            return False
+        try:
+            done = subprocess.run(
+                ['sudo', '-n', str(script), orientation, str(self.app.config_path)],
+                capture_output=True, text=True, timeout=300)
+        except Exception as e:
+            logger.warning("Boot splash rebuild failed: %s", e)
+            return False
+        if done.returncode == 0:
+            logger.info("Boot splash rebuilt for %s", orientation)
+            return True
+        logger.warning("Boot splash NOT rebuilt for %s (exit %s): %s",
+                       orientation, done.returncode,
+                       (done.stderr or done.stdout or '').strip()[-300:])
+        return False
 
     def handle_rotate_orientation(self):
         """Change the mounting orientation (content-rotation, no reboot): save it
@@ -1247,6 +1256,8 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
                         syncer.switch_orientation(old_orientation)
                     except Exception as e:
                         logger.error(f"Orientation switch sync failed: {e}")
+                if changed:          # last: slow, and pictures matter more
+                    self._rebuild_boot_splash(new_orientation)
             threading.Thread(target=restart_display, daemon=True).start()
         except Exception as e:
             logger.error(f"Error changing orientation: {e}")
