@@ -122,7 +122,7 @@
         });
         document.title = 'mimir – ' + t('title');
 
-        var items = [], orientation = 'horizontal', filter = 'all';
+        var items = [], orient = 'horizontal', filter = 'all';
 
         function showCount() {
             var shown = items.filter(function (i) { return !i.hidden; }).length;
@@ -146,7 +146,7 @@
                 var img = document.createElement('img');
                 img.loading = 'lazy';
                 img.alt = '';
-                img.src = '/api/library/thumb/' + orientation + '/' + encodeURIComponent(it.name) +
+                img.src = '/api/library/thumb/' + orient + '/' + encodeURIComponent(it.name) +
                     (token ? '?token=' + encodeURIComponent(token) : '');
                 img.onerror = function () {
                     if (img.dataset.retried) { img.style.visibility = 'hidden'; return; }
@@ -214,7 +214,7 @@
         function load() {
             return api('/api/library').then(function (d) {
                 items = d.items || [];
-                orientation = d.orientation || 'horizontal';
+                orient = d.orientation || 'horizontal';
                 render();
             }).catch(function () {
                 document.getElementById('msg').textContent = t('failed');
