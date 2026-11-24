@@ -10,10 +10,15 @@
 
 REPO_URL="${PHOTOFRAME_REPO_URL:-https://github.com/rwkaspar/mimir.git}"
 REPO_REF="${PHOTOFRAME_REPO_REF:-main}"
+# Which display this image is for: lcd (HDMI screen) or eink (SPI e-paper).
+# One image per variant (see .github/workflows/build-image.yml), so the frame
+# never has to install software or switch services at the owner's home.
+VARIANT="${PHOTOFRAME_VARIANT:-lcd}"
+case "$VARIANT" in lcd|eink) ;; *) echo "unknown variant: $VARIANT"; exit 1 ;; esac
 BOOT_DIR="/boot/firmware"
 BOOT_REPO="${BOOT_DIR}/photo_frame"
 
-echo "Baking photo-frame app from ${REPO_URL}@${REPO_REF}"
+echo "Baking photo-frame app from ${REPO_URL}@${REPO_REF} (variant: ${VARIANT})"
 
 # App repo onto the boot partition; the bootstrap copies it to the detected
 # user's home on first boot.
@@ -25,6 +30,29 @@ rm -rf "${BOOT_REPO}/.git"
 
 cp "${BOOT_REPO}/scripts/photo_frame_bootstrap.sh" "${BOOT_DIR}/photo_frame_bootstrap.sh"
 chmod +x "${BOOT_DIR}/photo_frame_bootstrap.sh"
+
+# ---- Variant ----
+# setup_pi.sh reads this on first boot (before any mimir.yaml the owner put on
+# the boot partition, which still wins). `variant_fixed` tells the wizard not
+# to ask which display the frame has.
+mkdir -p /etc/mimir
+cat > /etc/mimir/image.yaml <<YAML
+variant: ${VARIANT}
+variant_fixed: true
+YAML
+
+if [ "$VARIANT" = "eink" ]; then
+    # SPI (panel) and I2C (PiSugar, Inky EEPROM) on from the first boot.
+    CONFIG_TXT="${BOOT_DIR}/config.txt"
+    grep -qE '^\s*dtparam=spi=on' "$CONFIG_TXT" \
+        || printf "\n# mimir e-ink panel\ndtparam=spi=on\n" >> "$CONFIG_TXT"
+    grep -qE '^\s*dtparam=i2c_arm=on' "$CONFIG_TXT" \
+        || printf "dtparam=i2c_arm=on\n" >> "$CONFIG_TXT"
+    # Both panel libraries, so choosing the panel in the wizard works without
+    # a download. A failure here fails the build rather than shipping an image
+    # that cannot drive a panel.
+    bash "${BOOT_REPO}/scripts/install_eink_libs.sh" all
+fi
 
 # i2c-dev is needed for ddcutil (DDC/CI backlight control).
 echo "i2c-dev" > /etc/modules-load.d/i2c-dev.conf
@@ -82,4 +110,4 @@ PRIORITY=100
 ZRAM
 systemctl enable zramswap.service 2>/dev/null || true
 
-echo "photo-frame bake complete (runtime trims applied)"
+echo "photo-frame bake complete (variant: ${VARIANT}, runtime trims applied)"

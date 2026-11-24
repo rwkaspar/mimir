@@ -59,22 +59,12 @@ if [ -f "$CONFIG_TXT" ]; then
 fi
 
 # ---- 2. panel library ----
+# (already in /opt/mimir-eink on the ready-made e-ink image)
 mkdir -p "$LIB_DIR"
-pip_target() {
-    python3 -m pip install --quiet --upgrade --no-deps --target "$LIB_DIR" "$@"
-}
 case "$DRIVER" in
     waveshare:*)
-        if [ -d "$LIB_DIR/waveshare_epd" ]; then
-            say "waveshare_epd already installed"
-        else
-            say "installing waveshare_epd (Waveshare e-Paper library)..."
-            # The library lives in a subdirectory of Waveshare's repo; --no-deps
-            # because its setup.py pulls RPi.GPIO, which the Pi-5-era kernel no
-            # longer supports — spidev + gpiozero come from apt instead.
-            pip_target "git+https://github.com/waveshare/e-Paper.git#subdirectory=RaspberryPi_JetsonNano/python" \
-                || say "WARNING: could not install waveshare_epd (no network?). Re-run this script later."
-        fi
+        bash "${SCRIPT_DIR}/install_eink_libs.sh" waveshare \
+            || say "WARNING: could not install waveshare_epd (no network?). Re-run this script later."
         MODULE="${DRIVER#waveshare:}"
         if [ -d "$LIB_DIR/waveshare_epd" ] && [ ! -f "$LIB_DIR/waveshare_epd/${MODULE}.py" ]; then
             say "WARNING: no driver '${MODULE}' in waveshare_epd. Available 7.x drivers:"
@@ -85,16 +75,8 @@ case "$DRIVER" in
         fi
         ;;
     inky)
-        if [ -d "$LIB_DIR/inky" ]; then
-            say "inky already installed"
-        else
-            say "installing inky (Pimoroni)..."
-            # --no-deps: numpy/Pillow/spidev come from apt; pulling them again
-            # into $LIB_DIR would shadow the system builds (and take ages on a
-            # Zero). Only Inky's own small helpers are added.
-            pip_target inky gpiodevice gpiod smbus2 \
-                || say "WARNING: could not install inky (no network?). Re-run this script later."
-        fi
+        bash "${SCRIPT_DIR}/install_eink_libs.sh" inky \
+            || say "WARNING: could not install inky (no network?). Re-run this script later."
         ;;
     ""|simulator)
         say "no panel driver configured — the cycle writes a PNG (simulator)."

@@ -124,3 +124,21 @@ def test_can_switch_needs_an_explicit_rule_not_a_cached_password():
     assert dc.has_nopasswd_rule(listing, script) is False      # (ALL) ALL is not enough
     assert dc.has_nopasswd_rule(listing + '    (ALL) NOPASSWD: ' + script + '\n', script)
     assert dc.has_nopasswd_rule('', script) is False
+
+
+def test_image_frames_report_a_fixed_display():
+    """One image per display: the wizard must not ask which one."""
+    assert dc.options({}, hdmi=True, switchable=True)['fixed'] is False
+    o = dc.options({'variant': 'eink', 'variant_fixed': True}, hdmi=False, switchable=True)
+    assert o['fixed'] is True and o['variant'] == 'eink' and o['confirmed'] is False
+
+
+def test_panel_choice_on_the_eink_image_goes_through_the_switch(tmp_path):
+    """Same variant, new panel: the root helper sizes the pictures and restarts."""
+    cfg = {'variant': 'eink', 'variant_fixed': True}
+    path = cfg_file(tmp_path, cfg)
+    ran = []
+    res = dc.apply(cfg, path, {'variant': 'eink', 'driver': 'inky'}, run_switch=ran.append)
+    assert res['restart'] is True and ran == ['eink']
+    saved = yaml.safe_load(open(path))
+    assert saved['variant_fixed'] is True and saved['eink'] == {'driver': 'inky'}

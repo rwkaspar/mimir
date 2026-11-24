@@ -100,6 +100,51 @@ def test_wizard_page(tmp_path, phone):
         f.stop()
 
 
+def wizard_after_language(tmp_path, phone, **cfg):
+    f = start_frame(tmp_path, setup_complete=False,
+                    extra=dict({'display_confirmed': False}, **cfg))
+    ph = phone()
+    ph.open(f.url('/'))
+    ph.page.evaluate("setLanguage('en')")
+    ph.page.wait_for_selector('.step.active:not(#step-1)')
+    return f, ph
+
+
+def shown(ph, selector):
+    return ph.page.is_visible(selector)
+
+
+def test_wizard_asks_for_the_display_on_a_source_install(tmp_path, phone):
+    f, ph = wizard_after_language(tmp_path, phone)
+    try:
+        assert shown(ph, '#step-display.active')
+        assert shown(ph, '#display-card-lcd') and shown(ph, '#display-card-eink')
+        check_clean(ph, 'wizard-display')
+    finally:
+        f.stop()
+
+
+def test_wizard_skips_the_display_on_the_hdmi_image(tmp_path, phone):
+    f, ph = wizard_after_language(tmp_path, phone, variant_fixed=True)
+    try:
+        assert shown(ph, '#step-2.active') and not shown(ph, '#step-display')
+    finally:
+        f.stop()
+
+
+def test_wizard_asks_only_for_the_panel_on_the_eink_image(tmp_path, phone):
+    f, ph = wizard_after_language(tmp_path, phone, variant='eink', variant_fixed=True,
+                                  eink={})
+    try:
+        assert shown(ph, '#step-display.active')
+        assert not shown(ph, '#display-card-lcd') and not shown(ph, '#display-card-eink')
+        assert shown(ph, '#display-panel') and shown(ph, '#display-pisugar')
+        assert 'e-ink panel' in ph.page.inner_text('#display-title')
+        check_clean(ph, 'wizard-eink-panel')
+    finally:
+        f.stop()
+
+
 def test_wifi_setup_page(tmp_path, phone):
     """As a phone meets it: on the frame's own setup hotspot, without a token."""
     f = start_frame(tmp_path, setup_complete=False, wifi_mode='hotspot')

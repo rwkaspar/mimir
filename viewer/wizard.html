@@ -326,8 +326,8 @@
          step: it is asked once and skipped when already answered) -->
     <div class="step" id="step-display">
         <div id="display-ask" style="flex:1; display:flex; flex-direction:column;">
-            <div class="step-title" data-i18n="display_title">Which display?</div>
-            <div class="step-subtitle" data-i18n="display_subtitle">This decides what the frame can do.</div>
+            <div class="step-title" id="display-title" data-i18n="display_title">Which display?</div>
+            <div class="step-subtitle" id="display-subtitle" data-i18n="display_subtitle">This decides what the frame can do.</div>
             <div class="card" id="display-card-lcd" onclick="pickDisplay('lcd')">
                 <div class="card-title" data-i18n="display_lcd">Screen (HDMI)</div>
                 <div style="color:#999; font-size:14px;" data-i18n="display_lcd_desc"></div>
@@ -554,6 +554,8 @@
             display_eink: 'E-ink (e-paper)',
             display_eink_desc: 'One photo a day, like a print. No videos, no clock. Runs for weeks on a battery.',
             display_panel: 'Which panel?',
+            display_panel_title: 'Which e-ink panel does your frame have?',
+            display_panel_subtitle: 'The name is printed on the panel or on its packaging.',
             display_battery: 'Battery board',
             display_no_battery: 'None (power supply)',
             display_hdmi_yes: 'A screen is connected to HDMI.',
@@ -671,6 +673,8 @@
             display_eink: 'E-Ink (E-Paper)',
             display_eink_desc: 'Ein Foto pro Tag, wie gedruckt. Keine Videos, keine Uhr. L\u00e4uft mit Akku wochenlang.',
             display_panel: 'Welches Panel?',
+            display_panel_title: 'Welches E-Ink-Panel hat dein Rahmen?',
+            display_panel_subtitle: 'Der Name steht auf dem Panel oder auf seiner Verpackung.',
             display_battery: 'Akku-Platine',
             display_no_battery: 'Keine (Netzteil)',
             display_hdmi_yes: 'An HDMI ist ein Bildschirm angeschlossen.',
@@ -840,7 +844,15 @@
     function displayStepMaybe() {
         fetch('/api/display').then(function(r) { return r.json(); }).then(function(d) {
             if (!d || !d.variant || d.confirmed) { nextStep(); return; }
+            // Ready-made image: the display is known. HDMI has nothing left
+            // to ask; e-ink still needs the panel (and the battery board).
+            var fixed = !!d.fixed;
+            if (fixed && d.variant !== 'eink') { nextStep(); return; }
             displayInfo = d;
+            document.getElementById('display-card-lcd').style.display = fixed ? 'none' : '';
+            document.getElementById('display-card-eink').style.display = fixed ? 'none' : '';
+            document.getElementById('display-title').textContent = t(fixed ? 'display_panel_title' : 'display_title');
+            document.getElementById('display-subtitle').textContent = t(fixed ? 'display_panel_subtitle' : 'display_subtitle');
             var opt = function(v, label, sel) {
                 return '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(label) + '</option>';
             };
@@ -850,13 +862,13 @@
             document.getElementById('display-pisugar').innerHTML = d.pisugar_models.map(function(m) {
                 return opt(m, m || t('display_no_battery'), m === d.pisugar_model);
             }).join('');
-            document.getElementById('display-hint').textContent =
+            document.getElementById('display-hint').textContent = fixed ? '' :
                 d.hdmi_connected === true ? t('display_hdmi_yes') :
                 d.hdmi_connected === false ? t('display_hdmi_no') : '';
             document.getElementById('display-msg').innerHTML = '';
             document.getElementById('display-ask').style.display = 'flex';
             document.getElementById('display-wait').style.display = 'none';
-            pickDisplay(d.suggested || d.variant);
+            pickDisplay(fixed ? d.variant : (d.suggested || d.variant));
             for (var i = 1; i <= totalSteps; i++) {
                 var el = document.getElementById('step-' + i);
                 if (el) el.classList.remove('active');

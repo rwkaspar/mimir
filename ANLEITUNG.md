@@ -15,8 +15,10 @@ zeigt sie als Vollbild-Diashow.
 
 ## Schnellstart (fertiges Image)
 
-1. **Image herunterladen:** die neueste Datei `mimir-*.img.xz`
-   von der [Releases-Seite](https://github.com/rwkaspar/mimir/releases).
+1. **Image herunterladen** von der
+   [Releases-Seite](https://github.com/rwkaspar/mimir/releases) — passend zum
+   Display: **`mimir-hdmi`** für einen Bildschirm an HDMI, **`mimir-eink`**
+   für ein E-Paper-Panel.
 2. **Mit dem [Raspberry Pi Imager](https://www.raspberrypi.com/software/) flashen:**
    *OS wählen → Eigenes Image verwenden* → die `.img.xz` auswählen.
    Im Anpassungsdialog **WLAN**, **Sprache/Zeitzone** setzen und bei Bedarf
@@ -36,7 +38,8 @@ zeigt sie als Vollbild-Diashow.
 Alle Einstellungen gibt es danach auch am Handy: denselben QR-Code scannen oder
 `http://mimir.local:8080/` öffnen.
 
-**E-Ink-Rahmen** (stromsparend, mit Akku): siehe [docs/EINK.md](docs/EINK.md).
+**E-Ink-Rahmen** (stromsparend, mit Akku): das Image `mimir-eink` nehmen,
+weiter in [docs/EINK.md](docs/EINK.md).
 
 **Zugang:** Benutzer `frame`, Passwort `photoframe` — nach dem ersten Login
 mit `passwd` ändern. Bei aktiviertem SSH erreichbar unter `mimir.local`.

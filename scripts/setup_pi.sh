@@ -34,9 +34,12 @@ log "User: ${FRAME_USER}, Repo: ${REPO_DIR}"
 # (e.g. `variant: eink` plus an `eink:` section) — it is merged into the config
 # further down. On a re-run the existing config wins.
 BOOT_OVERRIDE="/boot/firmware/mimir.yaml"
+# The ready-made images (one for HDMI, one for e-ink) carry their variant in
+# this file; it seeds a freshly created config. The boot override beats it.
+IMAGE_DEFAULTS="/etc/mimir/image.yaml"
 read_variant() {
     local v=""
-    for f in "${REPO_DIR}/config_frame.yaml" "$BOOT_OVERRIDE"; do
+    for f in "${REPO_DIR}/config_frame.yaml" "$BOOT_OVERRIDE" "$IMAGE_DEFAULTS"; do
         if [ -z "$v" ] && [ -f "$f" ]; then
             v="$(grep -E '^variant:' "$f" 2>/dev/null | head -1 | awk '{print $2}' | tr -d "\"'\r")"
         fi
@@ -347,6 +350,13 @@ logging:
   level: INFO
   file: /var/log/photo_frame.log
 YAML
+    # Ready-made image: its variant goes into the new config. Only here, on
+    # creation — a later re-run must not undo a switch made by hand.
+    if [ -f "$IMAGE_DEFAULTS" ]; then
+        log "Applying image defaults from ${IMAGE_DEFAULTS}..."
+        python3 "${REPO_DIR}/scripts/merge_config.py" "${REPO_DIR}/config_frame.yaml" "$IMAGE_DEFAULTS" 2>&1 | tee -a "$SETUP_LOG" \
+            || log "WARNING: could not apply ${IMAGE_DEFAULTS}"
+    fi
     chown "${FRAME_USER}:${FRAME_USER}" "${REPO_DIR}/config_frame.yaml"
 fi
 

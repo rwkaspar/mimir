@@ -1,7 +1,15 @@
 name: Build Pi image
 
-# Builds a ready-to-flash 64-bit Raspberry Pi OS image with the photo frame
-# pre-installed. Run manually (workflow_dispatch) or automatically on a vX.Y.Z
+# Builds ready-to-flash 64-bit Raspberry Pi OS images with the photo frame
+# pre-installed — one per display, from the same source:
+#
+#   mimir-hdmi   HDMI screen: slideshow, videos, clock, night sleep
+#   mimir-eink   SPI e-paper: SPI on, panel libraries included, e-ink cycle
+#
+# The variant is baked in (imaging/stage-photoframe), so a frame never has to
+# install software or swap services at the owner's home.
+#
+# Run manually (workflow_dispatch) or automatically on a vX.Y.Z
 # tag, in which case the image is attached to the GitHub release.
 #
 # Target: arm64 only, Raspberry Pi Zero 2 W and newer.
@@ -23,6 +31,15 @@ permissions:
 jobs:
   build-image:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: lcd
+            name: hdmi
+          - variant: eink
+            name: eink
+    name: build-image (${{ matrix.name }})
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +58,7 @@ jobs:
           docker-images: false
           swap-storage: false
 
-      - name: Pin app repo + ref into the bake script
+      - name: Pin app repo + ref + variant into the bake script
         # pi-gen runs the install step inside a chroot where workflow env vars
         # are not visible, so bake the values into the script on the host first.
         run: |
@@ -54,14 +71,16 @@ jobs:
           SCRIPT=imaging/stage-photoframe/00-photoframe/01-run-chroot.sh
           sed -i "s|:-https://github.com/rwkaspar/mimir.git}|:-${URL}}|" "$SCRIPT"
           sed -i "s|:-main}|:-${REF}}|" "$SCRIPT"
-          echo "Baking ${URL}@${REF}"
-          grep -E 'REPO_URL=|REPO_REF=' "$SCRIPT"
+          sed -i "s|PHOTOFRAME_VARIANT:-lcd}|PHOTOFRAME_VARIANT:-${{ matrix.variant }}}|" "$SCRIPT"
+          echo "Baking ${URL}@${REF} for ${{ matrix.variant }}"
+          grep -E '^(REPO_URL|REPO_REF|VARIANT)=' "$SCRIPT"
+          grep -q '^VARIANT="${PHOTOFRAME_VARIANT:-${{ matrix.variant }}}"' "$SCRIPT"
 
       - name: Build image
         id: build
         uses: usimd/pi-gen-action@v1
         with:
-          image-name: mimir
+          image-name: mimir-${{ matrix.name }}
           pi-gen-version: arm64
           release: trixie
           stage-list: stage0 stage1 stage2 ./imaging/stage-photoframe
@@ -83,7 +102,7 @@ jobs:
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mimir-image
+          name: mimir-${{ matrix.name }}-image
           path: ${{ steps.build.outputs.image-path }}
           if-no-files-found: error
 

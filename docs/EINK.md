@@ -25,24 +25,36 @@ RTC alarm powers the Pi up
 
 ## Setup
 
-The setup wizard asks **"Which display does your frame have?"** — that is all
-it takes:
+Use the **`mimir-eink`** image: SPI is on, the panel libraries for Waveshare
+and Inky are included and the e-ink cycle is the display service from the
+first start. The wizard only asks which panel the frame has.
 
-1. Flash the normal mimir image (see the README) and boot.
+> The e-ink image is built by CI but has not been run on a panel yet.
+
+1. Flash `mimir-eink` (see the README) and boot.
 2. An e-ink frame has nothing to show yet (it does not know its panel), so
    join the frame's own Wi-Fi by hand: **`mimir-Setup`**, password
    **`photoframe`**. The setup page opens; pick your home Wi-Fi.
 3. Reconnect the phone to your home Wi-Fi and tap **"Einrichtung fortsetzen"**
    on the setup page (keep that page open — the link carries the frame's access
-   key). After the language the wizard asks for the display: choose **E-ink**,
-   your panel and the battery board (if any).
-4. The frame installs the panel driver, turns SPI on and restarts (3–5 min).
-   The phone page continues by itself; the panel now shows the setup screen.
+   key). After the language the wizard asks for your panel and the battery
+   board (if any).
+4. The frame sizes its pictures to the panel and restarts; with a battery
+   board it first downloads the PiSugar service. The phone page continues by
+   itself; the panel now shows the setup screen.
+
+To have the panel show the setup screen from the very first start, name the
+panel before booting: a `mimir.yaml` on the boot partition with the `eink:`
+section below (the `variant` line is not needed on this image).
+
+**Flashed the HDMI image, or installed from source?** There the wizard asks
+**"Which display does your frame have?"**; choosing e-ink installs the panel
+driver, turns SPI on and restarts (3–5 min, needs network).
 
 What changes with e-ink: one still picture at a time (no videos — they are not
 even synced), no clock (a date line instead), no night sleep step.
 
-**Without the question** (pre-seeding, or an older install): put a file
+**Without the wizard** (pre-seeding, or an older install): put a file
 `mimir.yaml` on the boot partition before the first boot —
 
 ```yaml

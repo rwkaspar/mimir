@@ -2,7 +2,9 @@
 
 The answer changes a lot (LCD: HDMI panel, slideshow, videos, clock, night
 sleep; e-ink: SPI panel, one still picture per day, battery), so it is asked
-once, early, instead of being inferred. `options()` is what the wizard shows,
+once, early, instead of being inferred. Frames flashed from a ready-made
+image already know (`variant_fixed`, one image per display): there the wizard
+skips the question on HDMI and only asks for the panel on e-ink. `options()` is what the wizard shows,
 `apply()` stores the answer and — when the variant or the panel changed —
 hands over to scripts/switch_variant.sh (root: SPI, panel library, services,
 reboot).
@@ -94,6 +96,9 @@ def options(config, hdmi=None, switchable=None):
         'suggested': suggested,
         'hdmi_connected': hdmi,
         'confirmed': bool((config or {}).get('display_confirmed')),
+        # Ready-made image for one display (HDMI or e-ink): the wizard does
+        # not ask which display, only — on e-ink — which panel.
+        'fixed': bool((config or {}).get('variant_fixed')),
         'driver': eink.get('driver') or '',
         'pisugar_model': eink.get('pisugar_model') or '',
         'panels': [{'driver': d, 'label': l} for d, l in EINK_PANELS],
