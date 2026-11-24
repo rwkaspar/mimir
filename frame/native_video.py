@@ -191,9 +191,9 @@ class VideoScheduler:
                 cfg = yaml.safe_load(f) or {}
             v = cfg.get('videos', {}) or {}
             # Respect both the overall video switch and the native-player switch.
-            return v.get('enabled', True) and v.get('native_enabled', True)
+            return v.get('enabled', True) and v.get('native_enabled', False)
         except Exception:
-            return True
+            return False
 
     def _loop(self):
         while True:

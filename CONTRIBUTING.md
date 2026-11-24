@@ -31,6 +31,43 @@ Maintainers record contributors in [`CONTRIBUTORS.md`](CONTRIBUTORS.md).
   and push, then pull on the Pi — an `scp`'d file is reverted on the next
   auto-update.
 
+## Tests
+
+```
+scripts/test.sh                    # everything, in Docker (needs only Docker)
+scripts/test.sh tests/browser      # pytest arguments pass through
+```
+
+Run it before every push; CI runs the same thing. Four layers, each there
+because its kind of mistake has reached a real frame:
+
+| Layer | What it catches |
+|---|---|
+| `tests/test_*.py` (unit) | logic: schedule, e-ink cycle, picture selection, setup screen at every panel size |
+| `tests/test_guards.py` (reads the source) | a `sudo` command without a sudoers rule in `setup_pi.sh`; state kept in `/tmp` (gone after a power cut); a page calling an address the server does not route; a text without both languages; a page script reusing a name the browser owns |
+| `tests/test_http.py` (real server, as a phone on the LAN) | anything readable or writable without the access token; routes that crash; both ways of rotating rebuild the boot logo |
+| `tests/browser/` (real mobile Chromium) | script errors, failed requests, pictures that do not load, raw text keys, pages wider than the screen; tapping through the pictures page |
+
+The browser tests save a screenshot of every page to `tests/browser/shots/`
+(CI: the `page-screenshots` artifact). **Look at them** — a green run says the
+page works, not that it looks right.
+
+`KNOWN_SUDO_GAPS` and `TMP_OK` in `tests/test_guards.py` are the two places
+where an exception to a rule is written down with its reason. Adding a line
+there is a decision, not a way to get the run green.
+
+After deploying to a frame, run the read-only device check **on the frame**:
+
+```
+ssh frame@mimir.local python3 digital_photo_frame/scripts/frame_check.py
+```
+
+It only reads (GET requests to the local server, systemd, the journal, sudo's
+rule list): right commit checked out, services restarted since the code
+changed, every page answers, every picture has a thumbnail, the night schedule
+is in the config, every sudo rule the code needs is installed on *this*
+device, the boot logo matches the orientation, no errors in the log.
+
 ## Pull requests
 
 - Keep changes focused; describe what and why.

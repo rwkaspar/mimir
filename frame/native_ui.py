@@ -118,7 +118,10 @@ class FbCanvas:
                     return ImageFont.truetype(path, size)
                 except Exception:
                     pass
-        return ImageFont.load_default()
+        try:                    # built-in font at the requested size
+            return ImageFont.load_default(max(1, int(size)))
+        except Exception:
+            return ImageFont.load_default()
 
     def _to_rgb565(self):
         import numpy as np

@@ -86,6 +86,10 @@ def main():
     if not eink:
         app.energy_save.start()
 
+    # LEGACY, off unless videos.native_enabled is set: the slideshow
+    # (frame/slideshow.py) plays videos itself. This was for the old browser
+    # kiosk, whose service and sudo rules setup_pi.sh no longer installs —
+    # left on by default it would cut into the slideshow every 10 minutes.
     # Native video interludes: the cog/WPE kiosk can't decode video on this
     # board, so a scheduler briefly drops the kiosk and plays videos straight to
     # the panel via the HW decoder, then restarts the kiosk. Videos live in
@@ -93,7 +97,7 @@ def main():
     video_cfg = config.get('videos', {}) or {}
     app.native_video = None
     if (not eink and video_cfg.get('enabled', True)
-            and video_cfg.get('native_enabled', True)):
+            and video_cfg.get('native_enabled', False)):
         from frame.native_video import NativeVideoPlayer, VideoScheduler
         app.native_video = NativeVideoPlayer(app, photos_dir)
         interval_s = int(video_cfg.get('native_interval_minutes', 10)) * 60

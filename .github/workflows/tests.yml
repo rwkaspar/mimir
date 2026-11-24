@@ -1,0 +1,24 @@
+name: tests
+
+# Unit tests, static guards, HTTP tests and the phone pages in a real mobile
+# browser — the same run as scripts/test.sh locally.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the test suite
+        run: scripts/test.sh
+      - name: Keep the page screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: page-screenshots
+          path: tests/browser/shots/
+          if-no-files-found: ignore

@@ -136,7 +136,12 @@ def _font(size, bold=False):
                 return ImageFont.truetype(p, size)
             except Exception:
                 pass
-    return ImageFont.load_default()
+    # No DejaVu on this system: Pillow's built-in font, at the size asked for
+    # (without a size it is a fixed 10px font, whatever was requested).
+    try:
+        return ImageFont.load_default(max(1, int(size)))
+    except Exception:
+        return ImageFont.load_default()
 
 
 _FONTS = {}
@@ -371,10 +376,15 @@ def render(size, stage, qr_modules=None, info=None, theme='dark', lang='de',
         d.rounded_rectangle(rect, radius=btn_h // 4, fill=fill,
                             outline=th['fg'] if theme == 'light' else None,
                             width=2 if theme == 'light' else 0)
-        bf = font(btn_h * 0.42, bold=primary)
-        while (d.textlength(label, font=bf) > (rect[2] - rect[0]) * 0.92
-               and bf.size > 9):
-            bf = font(bf.size - 1, bold=primary)
+        # Shrink the label until it fits. Count the size down ourselves: a
+        # fallback font may not report (or honour) the size it was asked for,
+        # and looping on `bf.size` then never ends.
+        px = int(btn_h * 0.42)
+        bf = font(px, bold=primary)
+        while (px > 9 and
+               d.textlength(label, font=bf) > (rect[2] - rect[0]) * 0.92):
+            px -= 1
+            bf = font(px, bold=primary)
         d.text(((rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2), label,
                font=bf, fill=fg, anchor='mm')
         hits[name] = rect

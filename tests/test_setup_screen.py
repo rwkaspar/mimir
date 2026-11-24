@@ -44,3 +44,16 @@ def test_qr_is_drawn_crisp():
 def test_wifi_qr_payload_escapes():
     assert ss.wifi_qr_payload('mimir-Setup', 'photoframe') == 'WIFI:S:mimir-Setup;T:WPA;P:photoframe;;'
     assert ss.wifi_qr_payload('a;b', 'p:w') == r'WIFI:S:a\;b;T:WPA;P:p\:w;;'
+
+
+def test_renders_without_the_dejavu_fonts(monkeypatch):
+    """A system without DejaVu falls back to Pillow's built-in font. That font
+    used to ignore the requested size, and the loop that shrinks a button
+    label until it fits never ended: the setup screen hung for good."""
+    import os
+    real = os.path.exists
+    monkeypatch.setattr(os.path, 'exists', lambda p: 'dejavu' not in str(p) and real(p))
+    monkeypatch.setattr(ss, '_FONTS', {})
+    for size in SIZES:
+        img, _ = ss.render(size, 'wifi_lost', QR, {'ssid': 'Heimnetz'}, touch=True)
+        assert img.size == size

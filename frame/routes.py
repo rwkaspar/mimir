@@ -206,65 +206,68 @@ class PhotoFrameHandler(SimpleHTTPRequestHandler):
         if not self._request_authorized(parsed_path):
             self._send_auth_required(parsed_path.path)
             return
-        if self.path == '/shutdown':
+        # Route on the path alone: with `self.path` a POST carrying its token
+        # in the query string (…?token=…) matched no route and got a 404.
+        path = parsed_path.path
+        if path == '/shutdown':
             self.handle_shutdown()
-        elif self.path == '/reboot':
+        elif path == '/reboot':
             self.handle_reboot()
-        elif self.path == '/schedule':
+        elif path == '/schedule':
             self.handle_save_schedule()
-        elif self.path == '/wake':
+        elif path == '/wake':
             self.handle_wake()
-        elif self.path == '/sleep':
+        elif path == '/sleep':
             self.handle_sleep()
-        elif self.path == '/api/mqtt':
+        elif path == '/api/mqtt':
             self.handle_save_mqtt()
-        elif self.path == '/api/connect':
+        elif path == '/api/connect':
             self.handle_save_connect()
-        elif self.path == '/orientation':
+        elif path == '/orientation':
             self.handle_save_orientation()
-        elif self.path == '/api/orientation/rotate':
+        elif path == '/api/orientation/rotate':
             self.handle_rotate_orientation()
-        elif self.path == '/brightness':
+        elif path == '/brightness':
             self.handle_set_brightness()
-        elif self.path == '/sync/trigger':
+        elif path == '/sync/trigger':
             self.handle_sync_trigger()
-        elif self.path == '/api/interval':
+        elif path == '/api/interval':
             self.handle_save_interval()
-        elif self.path == '/api/clock':
+        elif path == '/api/clock':
             self.handle_save_clock()
-        elif self.path == '/api/synology':
+        elif path == '/api/synology':
             self.handle_save_synology_config()
-        elif self.path == '/api/google_photos':
+        elif path == '/api/google_photos':
             self.handle_save_google_photos_config()
-        elif self.path == '/api/immich':
+        elif path == '/api/immich':
             self.handle_save_immich_config()
-        elif self.path == '/api/icloud':
+        elif path == '/api/icloud':
             self.handle_save_icloud_config()
-        elif self.path == '/api/nextcloud':
+        elif path == '/api/nextcloud':
             self.handle_save_nextcloud_config()
-        elif self.path == '/api/wifi/scan':
+        elif path == '/api/wifi/scan':
             self.handle_wifi_scan()
-        elif self.path == '/api/wifi/connect':
+        elif path == '/api/wifi/connect':
             self.handle_wifi_connect()
-        elif self.path == '/api/tailscale/install':
+        elif path == '/api/tailscale/install':
             self.handle_tailscale_install()
-        elif self.path == '/api/tailscale/up':
+        elif path == '/api/tailscale/up':
             self.handle_tailscale_up()
-        elif self.path == '/api/frame/settings':
+        elif path == '/api/frame/settings':
             self.handle_save_frame_settings()
-        elif self.path == '/api/sleep/test':
+        elif path == '/api/sleep/test':
             self.handle_sleep_test()
-        elif self.path == '/api/wifi/reconfigure':
+        elif path == '/api/wifi/reconfigure':
             self.handle_wifi_reconfigure()
-        elif self.path == '/api/wizard/complete':
+        elif path == '/api/wizard/complete':
             self.handle_wizard_complete()
-        elif self.path == '/api/eink':
+        elif path == '/api/eink':
             self.handle_save_eink()
-        elif self.path == '/api/display':
+        elif path == '/api/display':
             self.handle_display_choice()
-        elif self.path == '/api/library':
+        elif path == '/api/library':
             self.handle_library()
-        elif self.path == '/api/eink/refresh':
+        elif path == '/api/eink/refresh':
             self.handle_eink_refresh()
         else:
             self.send_error(404, "Not found")

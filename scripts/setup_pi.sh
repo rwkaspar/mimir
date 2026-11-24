@@ -541,6 +541,10 @@ ${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/setterm
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /sbin/shutdown
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /sbin/reboot
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/tailscale up *
+${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/tailscale status
+${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/tailscale status --json
+${FRAME_USER} ALL=(ALL) NOPASSWD: /usr/bin/pkill -f tailscale up
+${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/sh -c setterm --cursor off --blank force --powerdown 0 > /dev/tty1
 ${FRAME_USER} ALL=(ALL) NOPASSWD: /bin/sh -c curl -fsSL https\://tailscale.com/install.sh | sh
 EOF
 chmod 440 /etc/sudoers.d/photo-frame
