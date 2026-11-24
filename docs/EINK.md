@@ -25,31 +25,38 @@ RTC alarm powers the Pi up
 
 ## Setup
 
-Use the **`mimir-eink`** image: SPI is on, the panel libraries for Waveshare
-and Inky are included and the e-ink cycle is the display service from the
-first start. The wizard only asks which panel the frame has.
+Flash the image **for your panel**. The panel is set, SPI is on, its library
+is included and the e-ink cycle is the display service — the panel shows the
+setup screen on its first start.
 
-> The e-ink image is built by CI but has not been run on a panel yet.
+| Panel | Image |
+|---|---|
+| 7.3" Spectra 6, 6 colours, 800×480 (Waveshare 7.3inch E6, Good Display GDEP073E01) | `mimir-eink-7in3e` |
+| 7.3" ACeP, 7 colours, 800×480 (Waveshare 7.3inch F) | `mimir-eink-7in3f` |
+| 5.65" ACeP, 7 colours, 600×448 (Waveshare 5.65inch F) | `mimir-eink-5in65f` |
+| 4.01" ACeP, 7 colours, 640×400 (Waveshare 4.01inch F) | `mimir-eink-4in01f` |
+| 7.5" black/white, 800×480 (Waveshare 7.5inch V2) | `mimir-eink-7in5-v2` |
+| 7.5" black/white/red, 800×480 (Waveshare 7.5inch B V2) | `mimir-eink-7in5b-v2` |
+| Pimoroni Inky Impression (model is detected) | `mimir-eink-inky` |
 
-1. Flash `mimir-eink` (see the README) and boot.
-2. An e-ink frame has nothing to show yet (it does not know its panel), so
-   join the frame's own Wi-Fi by hand: **`mimir-Setup`**, password
-   **`photoframe`**. The setup page opens; pick your home Wi-Fi.
+> The e-ink images are built by CI but have not been run on a panel yet.
+
+1. Flash the image (see the README) and boot. The first start sets itself up
+   (a few minutes), then the panel shows a QR code.
+2. Scan it — or join the frame's own Wi-Fi by hand: **`mimir-Setup`**,
+   password **`photoframe`**. The setup page opens; pick your home Wi-Fi.
 3. Reconnect the phone to your home Wi-Fi and tap **"Einrichtung fortsetzen"**
    on the setup page (keep that page open — the link carries the frame's access
-   key). After the language the wizard asks for your panel and the battery
-   board (if any).
-4. The frame sizes its pictures to the panel and restarts; with a battery
-   board it first downloads the PiSugar service. The phone page continues by
-   itself; the panel now shows the setup screen.
+   key). After the language the wizard asks whether the frame has a battery
+   board (PiSugar). With one, the frame downloads its service and restarts.
 
-To have the panel show the setup screen from the very first start, name the
-panel before booting: a `mimir.yaml` on the boot partition with the `eink:`
-section below (the `variant` line is not needed on this image).
+Wrong image for your panel? Flash the right one. A panel that is not in the
+table: install from source (README, options B/C) with a `mimir.yaml` as shown
+below, or set `eink.driver` and run `sudo scripts/switch_variant.sh eink`.
 
-**Flashed the HDMI image, or installed from source?** There the wizard asks
-**"Which display does your frame have?"**; choosing e-ink installs the panel
-driver, turns SPI on and restarts (3–5 min, needs network).
+**Installed from source?** There the wizard asks **"Which display does your
+frame have?"**; choosing e-ink installs the panel driver, turns SPI on and
+restarts (3–5 min, needs network).
 
 What changes with e-ink: one still picture at a time (no videos — they are not
 even synced), no clock (a date line instead), no night sleep step.

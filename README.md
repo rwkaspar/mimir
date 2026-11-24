@@ -119,8 +119,9 @@ only if you want to build from source.
 
 1. Download the image for your display from the
    [Releases page](https://github.com/rwkaspar/mimir/releases):
-   **`mimir-hdmi`** for a screen on HDMI, **`mimir-eink`** for an e-paper
-   panel (see [docs/EINK.md](docs/EINK.md)).
+   **`mimir-hdmi`** for a screen on HDMI, or the **`mimir-eink-…`** image of
+   your e-paper panel (table in [docs/EINK.md](docs/EINK.md)). Flashed the
+   wrong one? Flash the right one — an image cannot be switched over.
 2. Flash it with [Raspberry Pi Imager](https://www.raspberrypi.com/software/):
    *Choose OS → Use custom* → pick the `.img.xz`. In the customization dialog
    set your **WiFi**, **locale/timezone**, and enable **SSH** if you want
@@ -137,7 +138,7 @@ only if you want to build from source.
    **“Hier am Rahmen weitermachen”** and use the on-device menu.
 
 Each image is built for one display, so the wizard does not ask which one
-the frame has. The e-ink image only asks for the panel model; an e-ink frame
+the frame has. An e-ink image only asks for the battery board; an e-ink frame
 shows one still picture at a time (no videos, no clock, no night sleep). See
 [docs/EINK.md](docs/EINK.md). Installs from source (options B and C) are
 asked **screen (HDMI)** or **e-ink** in the wizard instead.

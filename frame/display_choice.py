@@ -3,8 +3,9 @@
 The answer changes a lot (LCD: HDMI panel, slideshow, videos, clock, night
 sleep; e-ink: SPI panel, one still picture per day, battery), so it is asked
 once, early, instead of being inferred. Frames flashed from a ready-made
-image already know (`variant_fixed`, one image per display): there the wizard
-skips the question on HDMI and only asks for the panel on e-ink. `options()` is what the wizard shows,
+image already know (`variant_fixed`; one image for HDMI and one per e-ink
+panel): there the wizard skips the question on HDMI and only asks for the
+battery board on e-ink. `options()` is what the wizard shows,
 `apply()` stores the answer and — when the variant or the panel changed —
 hands over to scripts/switch_variant.sh (root: SPI, panel library, services,
 reboot).
@@ -35,6 +36,16 @@ EINK_PANELS = [
     ('waveshare:epd7in5b_V2', '7,5" schwarz-weiß-rot, 800×480 (Waveshare 7.5inch B V2)'),
     ('inky', 'Pimoroni Inky Impression (wird erkannt)'),
 ]
+
+
+def image_name(driver=None):
+    """File name of the ready-made image: one for HDMI, one per e-ink panel
+    in EINK_PANELS (the matrix in .github/workflows/build-image.yml)."""
+    if not driver:
+        return 'mimir-hdmi'
+    return 'mimir-eink-' + driver.split(':')[-1].replace('epd', '', 1).replace('_', '-').lower()
+
+
 # Model names as the PiSugar installer expects them ('' = no battery board).
 PISUGAR_MODELS = ['', 'PiSugar 3', 'PiSugar 2 (4-LEDs)', 'PiSugar 2 (2-LEDs)',
                   'PiSugar 2 Pro']
@@ -96,8 +107,9 @@ def options(config, hdmi=None, switchable=None):
         'suggested': suggested,
         'hdmi_connected': hdmi,
         'confirmed': bool((config or {}).get('display_confirmed')),
-        # Ready-made image for one display (HDMI or e-ink): the wizard does
-        # not ask which display, only — on e-ink — which panel.
+        # Ready-made image for one display (HDMI, or one e-ink panel): the
+        # wizard does not ask which display, only — on e-ink — for the
+        # battery board.
         'fixed': bool((config or {}).get('variant_fixed')),
         'driver': eink.get('driver') or '',
         'pisugar_model': eink.get('pisugar_model') or '',

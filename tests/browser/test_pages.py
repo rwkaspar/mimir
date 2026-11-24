@@ -132,15 +132,18 @@ def test_wizard_skips_the_display_on_the_hdmi_image(tmp_path, phone):
         f.stop()
 
 
-def test_wizard_asks_only_for_the_panel_on_the_eink_image(tmp_path, phone):
+def test_wizard_asks_only_for_the_battery_board_on_an_eink_image(tmp_path, phone):
     f, ph = wizard_after_language(tmp_path, phone, variant='eink', variant_fixed=True,
-                                  eink={})
+                                  eink={'driver': 'waveshare:epd7in3e'})
     try:
         assert shown(ph, '#step-display.active')
         assert not shown(ph, '#display-card-lcd') and not shown(ph, '#display-card-eink')
-        assert shown(ph, '#display-panel') and shown(ph, '#display-pisugar')
-        assert 'e-ink panel' in ph.page.inner_text('#display-title')
-        check_clean(ph, 'wizard-eink-panel')
+        assert not shown(ph, '#display-panel') and shown(ph, '#display-pisugar')
+        assert 'battery board' in ph.page.inner_text('#display-title')
+        check_clean(ph, 'wizard-eink-battery')
+        ph.page.click('#display-next')                      # "none": straight on
+        ph.page.wait_for_selector('#step-2.active')
+        assert f.config()['eink'] == {'driver': 'waveshare:epd7in3e'}
     finally:
         f.stop()
 

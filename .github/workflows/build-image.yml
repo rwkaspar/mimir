@@ -3,11 +3,15 @@ name: Build Pi image
 # Builds ready-to-flash 64-bit Raspberry Pi OS images with the photo frame
 # pre-installed — one per display, from the same source:
 #
-#   mimir-hdmi   HDMI screen: slideshow, videos, clock, night sleep
-#   mimir-eink   SPI e-paper: SPI on, panel libraries included, e-ink cycle
+#   mimir-hdmi          HDMI screen: slideshow, videos, clock, night sleep
+#   mimir-eink-<panel>  SPI e-paper, one image per panel: SPI on, the panel's
+#                       library and driver set, e-ink cycle
 #
-# The variant is baked in (imaging/stage-photoframe), so a frame never has to
-# install software or swap services at the owner's home.
+# Display and panel are baked in (imaging/stage-photoframe), so a frame never
+# installs software or swaps services at the owner's home, and an e-ink panel
+# shows the setup screen from its first start. Wrong image: flash the right
+# one. The e-ink rows must match EINK_PANELS in frame/display_choice.py
+# (tests/test_image_variants.py checks it).
 #
 # Run manually (workflow_dispatch) or automatically on a vX.Y.Z
 # tag, in which case the image is attached to the GitHub release.
@@ -35,11 +39,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - variant: lcd
-            name: hdmi
-          - variant: eink
-            name: eink
-    name: build-image (${{ matrix.name }})
+          - {variant: lcd, name: mimir-hdmi, driver: ''}
+          - {variant: eink, name: mimir-eink-7in3e, driver: 'waveshare:epd7in3e'}
+          - {variant: eink, name: mimir-eink-7in3f, driver: 'waveshare:epd7in3f'}
+          - {variant: eink, name: mimir-eink-5in65f, driver: 'waveshare:epd5in65f'}
+          - {variant: eink, name: mimir-eink-4in01f, driver: 'waveshare:epd4in01f'}
+          - {variant: eink, name: mimir-eink-7in5-v2, driver: 'waveshare:epd7in5_V2'}
+          - {variant: eink, name: mimir-eink-7in5b-v2, driver: 'waveshare:epd7in5b_V2'}
+          - {variant: eink, name: mimir-eink-inky, driver: 'inky'}
+    name: ${{ matrix.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,6 +66,13 @@ jobs:
           docker-images: false
           swap-storage: false
 
+      - name: Packages for this display
+        # 00-packages holds what every frame needs; add the variant's own.
+        run: |
+          DIR=imaging/stage-photoframe/00-photoframe
+          cat "$DIR/packages-${{ matrix.variant }}" >> "$DIR/00-packages"
+          cat "$DIR/00-packages"
+
       - name: Pin app repo + ref + variant into the bake script
         # pi-gen runs the install step inside a chroot where workflow env vars
         # are not visible, so bake the values into the script on the host first.
@@ -72,15 +87,17 @@ jobs:
           sed -i "s|:-https://github.com/rwkaspar/mimir.git}|:-${URL}}|" "$SCRIPT"
           sed -i "s|:-main}|:-${REF}}|" "$SCRIPT"
           sed -i "s|PHOTOFRAME_VARIANT:-lcd}|PHOTOFRAME_VARIANT:-${{ matrix.variant }}}|" "$SCRIPT"
-          echo "Baking ${URL}@${REF} for ${{ matrix.variant }}"
-          grep -E '^(REPO_URL|REPO_REF|VARIANT)=' "$SCRIPT"
+          sed -i "s|PHOTOFRAME_EINK_DRIVER:-}|PHOTOFRAME_EINK_DRIVER:-${{ matrix.driver }}}|" "$SCRIPT"
+          echo "Baking ${URL}@${REF} for ${{ matrix.variant }} ${{ matrix.driver }}"
+          grep -E '^(REPO_URL|REPO_REF|VARIANT|EINK_DRIVER)=' "$SCRIPT"
+          grep -q '^EINK_DRIVER="${PHOTOFRAME_EINK_DRIVER:-${{ matrix.driver }}}"' "$SCRIPT"
           grep -q '^VARIANT="${PHOTOFRAME_VARIANT:-${{ matrix.variant }}}"' "$SCRIPT"
 
       - name: Build image
         id: build
         uses: usimd/pi-gen-action@v1
         with:
-          image-name: mimir-${{ matrix.name }}
+          image-name: ${{ matrix.name }}
           pi-gen-version: arm64
           release: trixie
           stage-list: stage0 stage1 stage2 ./imaging/stage-photoframe
@@ -102,7 +119,7 @@ jobs:
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mimir-${{ matrix.name }}-image
+          name: ${{ matrix.name }}-image
           path: ${{ steps.build.outputs.image-path }}
           if-no-files-found: error
 

@@ -337,9 +337,9 @@
                 <div style="color:#999; font-size:14px;" data-i18n="display_eink_desc"></div>
             </div>
             <div id="display-eink-opts" style="display:none; margin-top:4px;">
-                <label style="display:block; color:#999; font-size:13px; margin:8px 0 4px;" data-i18n="display_panel">Panel</label>
+                <label id="display-panel-label" style="display:block; color:#999; font-size:13px; margin:8px 0 4px;" data-i18n="display_panel">Panel</label>
                 <select id="display-panel" style="width:100%; padding:12px; font-size:15px; background:#1a1a1a; color:#fff; border:1px solid #333; border-radius:8px;"></select>
-                <label style="display:block; color:#999; font-size:13px; margin:12px 0 4px;" data-i18n="display_battery">Battery board</label>
+                <label id="display-battery-label" style="display:block; color:#999; font-size:13px; margin:12px 0 4px;" data-i18n="display_battery">Battery board</label>
                 <select id="display-pisugar" style="width:100%; padding:12px; font-size:15px; background:#1a1a1a; color:#fff; border:1px solid #333; border-radius:8px;"></select>
             </div>
             <div id="display-hint" style="color:#888; font-size:13px; margin-top:12px;"></div>
@@ -556,6 +556,8 @@
             display_panel: 'Which panel?',
             display_panel_title: 'Which e-ink panel does your frame have?',
             display_panel_subtitle: 'The name is printed on the panel or on its packaging.',
+            display_battery_title: 'Does your frame have a battery board?',
+            display_battery_subtitle: 'With a PiSugar the frame switches itself off between pictures and runs for weeks. Choosing one downloads its software and restarts the frame.',
             display_battery: 'Battery board',
             display_no_battery: 'None (power supply)',
             display_hdmi_yes: 'A screen is connected to HDMI.',
@@ -675,6 +677,8 @@
             display_panel: 'Welches Panel?',
             display_panel_title: 'Welches E-Ink-Panel hat dein Rahmen?',
             display_panel_subtitle: 'Der Name steht auf dem Panel oder auf seiner Verpackung.',
+            display_battery_title: 'Hat dein Rahmen eine Akku-Platine?',
+            display_battery_subtitle: 'Mit einem PiSugar schaltet sich der Rahmen zwischen den Bildern aus und l\u00e4uft wochenlang. Mit Platine l\u00e4dt der Rahmen deren Software und startet neu.',
             display_battery: 'Akku-Platine',
             display_no_battery: 'Keine (Netzteil)',
             display_hdmi_yes: 'An HDMI ist ein Bildschirm angeschlossen.',
@@ -844,15 +848,20 @@
     function displayStepMaybe() {
         fetch('/api/display').then(function(r) { return r.json(); }).then(function(d) {
             if (!d || !d.variant || d.confirmed) { nextStep(); return; }
-            // Ready-made image: the display is known. HDMI has nothing left
-            // to ask; e-ink still needs the panel (and the battery board).
+            // Ready-made image: the display is known (one image for HDMI, one
+            // per e-ink panel). HDMI has nothing left to ask; e-ink only the
+            // battery board — and the panel, should the image not name it.
             var fixed = !!d.fixed;
+            var panelKnown = fixed && !!d.driver;
+            document.getElementById('display-panel-label').style.display = panelKnown ? 'none' : 'block';
+            document.getElementById('display-panel').style.display = panelKnown ? 'none' : '';
+            document.getElementById('display-battery-label').style.display = panelKnown ? 'none' : 'block';
             if (fixed && d.variant !== 'eink') { nextStep(); return; }
             displayInfo = d;
             document.getElementById('display-card-lcd').style.display = fixed ? 'none' : '';
             document.getElementById('display-card-eink').style.display = fixed ? 'none' : '';
-            document.getElementById('display-title').textContent = t(fixed ? 'display_panel_title' : 'display_title');
-            document.getElementById('display-subtitle').textContent = t(fixed ? 'display_panel_subtitle' : 'display_subtitle');
+            document.getElementById('display-title').textContent = t(panelKnown ? 'display_battery_title' : fixed ? 'display_panel_title' : 'display_title');
+            document.getElementById('display-subtitle').textContent = t(panelKnown ? 'display_battery_subtitle' : fixed ? 'display_panel_subtitle' : 'display_subtitle');
             var opt = function(v, label, sel) {
                 return '<option value="' + esc(v) + '"' + (sel ? ' selected' : '') + '>' + esc(label) + '</option>';
             };

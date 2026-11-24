@@ -133,12 +133,23 @@ def test_image_frames_report_a_fixed_display():
     assert o['fixed'] is True and o['variant'] == 'eink' and o['confirmed'] is False
 
 
-def test_panel_choice_on_the_eink_image_goes_through_the_switch(tmp_path):
-    """Same variant, new panel: the root helper sizes the pictures and restarts."""
-    cfg = {'variant': 'eink', 'variant_fixed': True}
+def test_eink_image_without_battery_board_needs_no_restart(tmp_path):
+    """The image names the panel: answering "no battery board" only confirms."""
+    cfg = {'variant': 'eink', 'variant_fixed': True, 'eink': {'driver': 'inky'}}
     path = cfg_file(tmp_path, cfg)
     ran = []
-    res = dc.apply(cfg, path, {'variant': 'eink', 'driver': 'inky'}, run_switch=ran.append)
-    assert res['restart'] is True and ran == ['eink']
+    res = dc.apply(cfg, path, {'variant': 'eink', 'driver': 'inky', 'pisugar_model': ''},
+                   run_switch=ran.append)
+    assert res['restart'] is False and ran == []
     saved = yaml.safe_load(open(path))
     assert saved['variant_fixed'] is True and saved['eink'] == {'driver': 'inky'}
+    assert saved['display_confirmed'] is True
+
+
+def test_eink_image_with_battery_board_installs_it(tmp_path):
+    cfg = {'variant': 'eink', 'variant_fixed': True, 'eink': {'driver': 'inky'}}
+    path = cfg_file(tmp_path, cfg)
+    ran = []
+    res = dc.apply(cfg, path, {'variant': 'eink', 'driver': 'inky',
+                               'pisugar_model': 'PiSugar 3'}, run_switch=ran.append)
+    assert res['restart'] is True and ran == ['eink']

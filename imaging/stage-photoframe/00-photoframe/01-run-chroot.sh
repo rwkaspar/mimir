@@ -10,15 +10,27 @@
 
 REPO_URL="${PHOTOFRAME_REPO_URL:-https://github.com/rwkaspar/mimir.git}"
 REPO_REF="${PHOTOFRAME_REPO_REF:-main}"
-# Which display this image is for: lcd (HDMI screen) or eink (SPI e-paper).
-# One image per variant (see .github/workflows/build-image.yml), so the frame
-# never has to install software or switch services at the owner's home.
+# Which display this image is for: lcd (HDMI screen) or eink (SPI e-paper) —
+# and for e-ink, which panel (eink.driver, e.g. waveshare:epd7in3e or inky).
+# One image per display (see .github/workflows/build-image.yml): the frame
+# never installs software or switches services at the owner's home, and an
+# e-ink panel shows the setup screen from its first start. The packages each
+# variant needs are packages-lcd / packages-eink next to this script; the
+# workflow appends the right one to 00-packages.
 VARIANT="${PHOTOFRAME_VARIANT:-lcd}"
+EINK_DRIVER="${PHOTOFRAME_EINK_DRIVER:-}"
 case "$VARIANT" in lcd|eink) ;; *) echo "unknown variant: $VARIANT"; exit 1 ;; esac
+if [ "$VARIANT" = "eink" ]; then
+    case "$EINK_DRIVER" in
+        waveshare:?*) EINK_LIB=waveshare ;;
+        inky) EINK_LIB=inky ;;
+        *) echo "e-ink image needs a panel (PHOTOFRAME_EINK_DRIVER), got '${EINK_DRIVER}'"; exit 1 ;;
+    esac
+fi
 BOOT_DIR="/boot/firmware"
 BOOT_REPO="${BOOT_DIR}/photo_frame"
 
-echo "Baking photo-frame app from ${REPO_URL}@${REPO_REF} (variant: ${VARIANT})"
+echo "Baking photo-frame app from ${REPO_URL}@${REPO_REF} (variant: ${VARIANT} ${EINK_DRIVER})"
 
 # App repo onto the boot partition; the bootstrap copies it to the detected
 # user's home on first boot.
@@ -42,16 +54,23 @@ variant_fixed: true
 YAML
 
 if [ "$VARIANT" = "eink" ]; then
+    cat >> /etc/mimir/image.yaml <<YAML
+eink:
+  driver: "${EINK_DRIVER}"
+YAML
     # SPI (panel) and I2C (PiSugar, Inky EEPROM) on from the first boot.
     CONFIG_TXT="${BOOT_DIR}/config.txt"
     grep -qE '^\s*dtparam=spi=on' "$CONFIG_TXT" \
         || printf "\n# mimir e-ink panel\ndtparam=spi=on\n" >> "$CONFIG_TXT"
     grep -qE '^\s*dtparam=i2c_arm=on' "$CONFIG_TXT" \
         || printf "dtparam=i2c_arm=on\n" >> "$CONFIG_TXT"
-    # Both panel libraries, so choosing the panel in the wizard works without
-    # a download. A failure here fails the build rather than shipping an image
-    # that cannot drive a panel.
-    bash "${BOOT_REPO}/scripts/install_eink_libs.sh" all
+    # The panel's library. A failure here fails the build rather than
+    # shipping an image that cannot drive its panel.
+    bash "${BOOT_REPO}/scripts/install_eink_libs.sh" "$EINK_LIB"
+    if [ "$EINK_LIB" = "waveshare" ] && [ -d /opt/mimir-eink/waveshare_epd ] \
+            && [ ! -f "/opt/mimir-eink/waveshare_epd/${EINK_DRIVER#waveshare:}.py" ]; then
+        echo "waveshare_epd has no driver ${EINK_DRIVER#waveshare:}"; exit 1
+    fi
 fi
 
 # i2c-dev is needed for ddcutil (DDC/CI backlight control).

@@ -1,0 +1,4 @@
+python3-spidev
+python3-gpiozero
+python3-lgpio
+i2c-tools

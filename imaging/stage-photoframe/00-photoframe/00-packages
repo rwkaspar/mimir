@@ -5,19 +5,7 @@ python3-pip
 python3-yaml
 python3-pil
 python3-numpy
-python3-gi
-gir1.2-gstreamer-1.0
-gir1.2-gst-plugins-base-1.0
-gstreamer1.0-tools
-gstreamer1.0-plugins-base
-gstreamer1.0-plugins-good
-gstreamer1.0-plugins-bad
-python3-spidev
-python3-gpiozero
-python3-lgpio
 fonts-dejavu-core
-ddcutil
-i2c-tools
 network-manager
 dnsmasq-base
 iptables
@@ -29,5 +17,3 @@ libheif-dev
 ffmpeg
 fake-hwclock
 zram-tools
-plymouth
-plymouth-themes

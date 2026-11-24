@@ -17,8 +17,10 @@ zeigt sie als Vollbild-Diashow.
 
 1. **Image herunterladen** von der
    [Releases-Seite](https://github.com/rwkaspar/mimir/releases) — passend zum
-   Display: **`mimir-hdmi`** für einen Bildschirm an HDMI, **`mimir-eink`**
-   für ein E-Paper-Panel.
+   Display: **`mimir-hdmi`** für einen Bildschirm an HDMI oder das
+   **`mimir-eink-…`**-Image deines E-Paper-Panels (Tabelle in
+   [docs/EINK.md](docs/EINK.md)). Falsches Image erwischt? Das richtige neu
+   flashen – umstellen lässt sich ein Image nicht.
 2. **Mit dem [Raspberry Pi Imager](https://www.raspberrypi.com/software/) flashen:**
    *OS wählen → Eigenes Image verwenden* → die `.img.xz` auswählen.
    Im Anpassungsdialog **WLAN**, **Sprache/Zeitzone** setzen und bei Bedarf
@@ -38,7 +40,7 @@ zeigt sie als Vollbild-Diashow.
 Alle Einstellungen gibt es danach auch am Handy: denselben QR-Code scannen oder
 `http://mimir.local:8080/` öffnen.
 
-**E-Ink-Rahmen** (stromsparend, mit Akku): das Image `mimir-eink` nehmen,
+**E-Ink-Rahmen** (stromsparend, mit Akku): das Image für dein Panel nehmen,
 weiter in [docs/EINK.md](docs/EINK.md).
 
 **Zugang:** Benutzer `frame`, Passwort `photoframe` — nach dem ersten Login

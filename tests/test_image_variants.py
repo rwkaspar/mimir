@@ -1,4 +1,4 @@
-"""Two images, one per display (HDMI, e-ink), from one bake script.
+"""One image per display (HDMI, and each e-ink panel), from one bake script.
 
 The pieces live in four files that only meet on a CI runner and on a frame's
 first boot: the workflow rewrites defaults in the bake script with sed, the
@@ -23,10 +23,37 @@ def workflow():
     return yaml.safe_load(WORKFLOW.read_text())['jobs']['build-image']
 
 
-def test_matrix_builds_exactly_the_two_variants():
+def test_matrix_builds_hdmi_and_every_panel_the_wizard_knows():
+    """A panel without an image would start with an empty panel."""
+    from frame import display_choice as dc
     rows = workflow()['strategy']['matrix']['include']
-    assert sorted(r['variant'] for r in rows) == ['eink', 'lcd']
-    assert len({r['name'] for r in rows}) == 2          # distinct file names
+    built = {(r['variant'], r['driver'], r['name']) for r in rows}
+    want = {('lcd', '', dc.image_name())}
+    want |= {('eink', d, dc.image_name(d)) for d, _ in dc.EINK_PANELS}
+    assert built == want
+    assert len({r['name'] for r in rows}) == len(rows)          # distinct file names
+
+
+def packages(name):
+    return set((BAKE.parent / name).read_text().split())
+
+
+@pytest.mark.parametrize('variant', ['lcd', 'eink'])
+def test_image_has_every_package_first_boot_wants(variant):
+    """Anything missing is fetched by setup_pi.sh on first boot — which needs
+    a network the frame may not have yet."""
+    text = SETUP.read_text()
+    def listed(var):
+        return set(re.search(r'^%s="([^"]+)"' % var, text, re.M).group(1).split())
+    want = listed('PACKAGES_COMMON') | listed('PACKAGES_' + variant.upper())
+    have = packages('00-packages') | packages('packages-' + variant)
+    assert not want - have, sorted(want - have)
+
+
+def test_each_image_carries_only_its_own_display_software():
+    assert not packages('00-packages') & (packages('packages-lcd') | packages('packages-eink'))
+    assert 'python3-gi' not in packages('packages-eink')          # no video stack on e-ink
+    assert 'python3-spidev' not in packages('packages-lcd')       # no panel/battery parts on HDMI
 
 
 def test_every_sed_in_the_workflow_hits_the_bake_script_once():
@@ -35,47 +62,54 @@ def test_every_sed_in_the_workflow_hits_the_bake_script_once():
     bake = BAKE.read_text()
     pin = next(s['run'] for s in workflow()['steps'] if 'bake script' in s.get('name', ''))
     patterns = re.findall(r'sed -i "s\|(.+?)\|', pin)
-    assert len(patterns) == 3
+    assert len(patterns) == 4
     for pat in patterns:
         assert bake.count(pat.replace('\\.', '.')) == 1, pat
 
 
-def bake_with(variant, tmp_path):
+def bake_with(variant, tmp_path, driver=''):
     """Run the variant part of the bake script against a fake root."""
     text = BAKE.read_text()
     start = text.index('# ---- Variant ----')
     end = text.index('# i2c-dev is needed')
     head = text[:text.index('BOOT_DIR=')]
     boot = tmp_path / 'boot'
-    (boot / 'photo_frame/scripts').mkdir(parents=True)
+    (boot / 'photo_frame/scripts').mkdir(parents=True, exist_ok=True)
     (boot / 'config.txt').write_text('# stock\n#dtparam=spi=on\n')
     (boot / 'photo_frame/scripts/install_eink_libs.sh').write_text(
         'echo "libs $1" > "%s"\n' % (tmp_path / 'libs'))
     script = (head + 'BOOT_DIR="%s"\nBOOT_REPO="${BOOT_DIR}/photo_frame"\n' % boot
               + text[start:end]).replace('/etc/mimir', str(tmp_path / 'etc'))
     return subprocess.run(['bash', '-e', '-c', script], capture_output=True, text=True,
-                          env=dict(os.environ, PHOTOFRAME_VARIANT=variant)), boot
+                          env=dict(os.environ, PHOTOFRAME_VARIANT=variant,
+                                   PHOTOFRAME_EINK_DRIVER=driver)), boot
 
 
-@pytest.mark.parametrize('variant', ['lcd', 'eink'])
-def test_bake_leaves_the_variant_for_first_boot(variant, tmp_path):
-    r, boot = bake_with(variant, tmp_path)
+@pytest.mark.parametrize('variant,driver,lib', [
+    ('lcd', '', None),
+    ('eink', 'waveshare:epd7in3e', 'waveshare'),
+    ('eink', 'inky', 'inky'),
+])
+def test_bake_leaves_display_and_panel_for_first_boot(variant, driver, lib, tmp_path):
+    r, boot = bake_with(variant, tmp_path, driver)
     assert r.returncode == 0, r.stderr
     image = yaml.safe_load((tmp_path / 'etc/image.yaml').read_text())
-    assert image == {'variant': variant, 'variant_fixed': True}
     config_txt = (boot / 'config.txt').read_text()
     if variant == 'eink':
+        assert image == {'variant': 'eink', 'variant_fixed': True, 'eink': {'driver': driver}}
         assert re.search(r'^dtparam=spi=on$', config_txt, re.M)
         assert re.search(r'^dtparam=i2c_arm=on$', config_txt, re.M)
-        assert (tmp_path / 'libs').read_text().strip() == 'libs all'
+        assert (tmp_path / 'libs').read_text().strip() == 'libs ' + lib
     else:
+        assert image == {'variant': 'lcd', 'variant_fixed': True}
         assert not re.search(r'^dtparam=spi=on$', config_txt, re.M)
         assert not (tmp_path / 'libs').exists()
 
 
-def test_bake_refuses_an_unknown_variant(tmp_path):
-    r, _ = bake_with('oled', tmp_path)
-    assert r.returncode != 0
+def test_bake_refuses_an_unknown_variant_or_an_eink_image_without_panel(tmp_path):
+    assert bake_with('oled', tmp_path)[0].returncode != 0
+    assert bake_with('eink', tmp_path)[0].returncode != 0
+    assert bake_with('eink', tmp_path, 'something')[0].returncode != 0
 
 
 def read_variant(tmp_path, config=None, override=None, image=None):
@@ -116,17 +150,17 @@ def test_image_defaults_merge_into_a_new_config(tmp_path):
     cfg = tmp_path / 'config_frame.yaml'
     cfg.write_text('setup_complete: false\nvariant: lcd\nframe:\n  name: photo-frame\n')
     image = tmp_path / 'image.yaml'
-    image.write_text('variant: eink\nvariant_fixed: true\n')
+    image.write_text('variant: eink\nvariant_fixed: true\neink:\n  driver: "inky"\n')
     subprocess.run(['python3', str(REPO / 'scripts/merge_config.py'), str(cfg), str(image)],
                    check=True, capture_output=True)
     merged = yaml.safe_load(cfg.read_text())
     assert merged['variant'] == 'eink' and merged['variant_fixed'] is True
-    assert merged['frame'] == {'name': 'photo-frame'}
+    assert merged['frame'] == {'name': 'photo-frame'} and merged['eink'] == {'driver': 'inky'}
 
 
 def test_panel_libraries_are_not_fetched_twice(tmp_path):
-    """On the e-ink image both libraries are there: choosing a panel in the
-    wizard must not need the network."""
+    """On an e-ink image the library is there: first boot must not need the
+    network for it."""
     (tmp_path / 'waveshare_epd').mkdir()
     (tmp_path / 'inky').mkdir()
     r = subprocess.run(['bash', str(REPO / 'scripts/install_eink_libs.sh'), 'all'],
