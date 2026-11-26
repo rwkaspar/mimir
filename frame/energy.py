@@ -142,6 +142,7 @@ class EnergySaveManager:
         self._wake_timer = None   # threading.Timer for an auto-wake sleep timer
         self._wake_hint = None    # "HH:MM" to show on the pre-sleep splash
         self._wake_event = threading.Event()
+        self._check_lock = threading.Lock()
         self._healing = False   # a wake-healer thread is retrying a dropped panel
         self._sleep_healing = False  # a sleep-healer thread is retrying DDC standby
         # Sleep method from config
@@ -223,7 +224,12 @@ class EnergySaveManager:
         if 'weekdays' in data:
             self.weekdays = data['weekdays']
         self._save()
-        self._check()
+        # Apply off-thread, never inside the request: going to sleep stops the
+        # slideshow, and when the change comes from the on-panel menu the
+        # slideshow is the caller, waiting for this very answer. Applied
+        # inline, each waited for the other until both timed out — the frame
+        # ended up frozen, lit and deaf to touch.
+        threading.Thread(target=self._check, daemon=True).start()
 
     def wake_display(self):
         """Wake display immediately (runs the heavy wake off-thread)."""
@@ -531,8 +537,14 @@ class EnergySaveManager:
                 self._notify_state()  # reflect "off" in HA immediately
                 # Stop the slideshow to free RAM + the HW decoder and release the
                 # display (returns to Linux console/framebuffer).
-                subprocess.run(['sudo', 'systemctl', 'stop', DISPLAY_SERVICE],
-                             capture_output=True, timeout=15)
+                # A slow stop must not abort the rest: systemd finishes the stop
+                # on its own, and without the steps below the panel would stay
+                # lit on a dead picture while we believe the frame is asleep.
+                try:
+                    subprocess.run(['sudo', 'systemctl', 'stop', DISPLAY_SERVICE],
+                                   capture_output=True, timeout=30)
+                except subprocess.TimeoutExpired:
+                    logger.warning("Sleep: %s is slow to stop; going on", DISPLAY_SERVICE)
                 time.sleep(1)
                 # Brief splash telling the viewer WHEN the frame comes back — the
                 # slideshow has released fb0, so we own it now. Touch-to-wake is
@@ -744,6 +756,15 @@ class EnergySaveManager:
             close_fds(fds)
 
     def _check(self):
+        # One at a time: the 30 s loop and a schedule change may both get here.
+        if not self._check_lock.acquire(blocking=False):
+            return
+        try:
+            self._check_locked()
+        finally:
+            self._check_lock.release()
+
+    def _check_locked(self):
         if not self.enabled:
             # Energy-save schedule is off. Wake a sleep the SCHEDULE started, but
             # never undo a manual/on-demand sleep: "Jetzt schlafen" / HA-off must
